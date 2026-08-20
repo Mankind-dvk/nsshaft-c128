@@ -16,9 +16,17 @@
 ; SID 控制寄存器的 bit 0 是 GATE：从 0 写到 1 会重新触发 ADSR 包络。这里
 ; 先写不带 GATE 的波形值，再写带 GATE 的值。频率表索引 0 表示休止，
 ; 1..61 表示音符；编曲数组只保存索引，不直接保存 16 位 SID 频率。
+;
+; English summary:
+;   A three-voice SID arrangement reconstructed from Quarter Slot: pulse lead,
+;   triangle bass, and shared saw/noise arpeggio-percussion voice. Raster IRQ 240
+;   advances playback independently of the main loop. The handler preserves
+;   A/X/Y, avoids shared zero-page pointers, acknowledges VIC, and returns through
+;   the C128 KERNAL restore path. Pattern entries are frequency-table indices.
 
 .segment "MUSIC"
 
+; EN: Clear SID/player state, configure instruments, and install raster IRQ 240.
 initialize_music:
     ; 输出：清 SID/播放器状态，写三声道音色，安装并启用光栅 IRQ。
     ; SEI/CLI 包住向量和中断源配置，避免只写完向量低字节时就发生 IRQ。
@@ -85,6 +93,7 @@ initialize_music:
     cli
     rts
 
+; EN: Acknowledge VIC, advance music, then use the KERNAL register/MMU restore path.
 music_raster_irq:
     ; C128 KERNAL 的硬件入口已经压栈保存寄存器；本例程先向 $d019 写 1 确认
     ; 光栅 IRQ，再播放一帧，最后跳到 $ff33 统一恢复，而不是执行普通 RTS。
@@ -94,6 +103,7 @@ music_raster_irq:
     jmp KERNAL_IRQ_RETURN
 
 ; 每帧先处理包络和声道 3 的鼓声延时，再用 8 位相位累加器推进八分音符。
+; EN: Accumulate PAL-frame tempo and trigger the next 128-step event on overflow.
 play_music_frame:
     ; 输入：无。输出：可能关闭上一音符 GATE、恢复琶音、推进 music_step。
     ; 8 位 tempo accumulator 的 ADC 溢出通过 C=1 表示；只有溢出帧才触发
@@ -131,6 +141,7 @@ play_music_frame:
 @done:
     rts
 
+; EN: Disable the raster source, restore the default IRQ vector, and silence SID.
 stop_music:
     ; 关闭 IRQ 和三个 GATE，并把总音量设为 0。保持 SEI，后续 new_game 的
     ; initialize_music 会重新安装 IRQ 并执行 CLI。
@@ -149,6 +160,7 @@ stop_music:
 
 ; 同一个步骤同时触发旋律和低音。鼓点只占用声道 3 的前两帧，随后恢复
 ; 当前琶音，因此在三个硬件声道内仍能保留节奏感和和声轮廓。
+; EN: Dispatch lead, bass, arpeggio, and drum events for music_step.
 music_trigger_current_step:
     ; 输入：music_step=0..127。输出：触发声道 1/2，并让声道 3 播鼓或琶音。
     ; drum_pattern 只有 8 步，所以 AND #7 等价于对 8 取模。
@@ -178,6 +190,7 @@ music_trigger_current_step:
     sta music_voice3_delay
     jmp music_trigger_arp
 
+; EN: Load voice-1 frequency and retrigger the pulse-wave ADSR gate.
 music_set_voice_1:
     ; 输入：A=音符编号，0 为休止。先 TAX 保存索引，再关闭 GATE、查低/高
     ; 频率字节，最后重新打开脉冲波 GATE。
@@ -195,6 +208,7 @@ music_set_voice_1:
 @done:
     rts
 
+; EN: Load voice-2 frequency and retrigger the triangle-wave ADSR gate.
 music_set_voice_2:
     ; 与声道 1 相同，但写入 SID 声道 2 并使用三角波控制值。
     tax
@@ -211,6 +225,7 @@ music_set_voice_2:
 @done:
     rts
 
+; EN: Trigger voice 3 as a short sawtooth arpeggio note.
 music_trigger_arp:
     ; 从当前步骤读取琶音音符；鼓声占用结束后也会由 play_music_frame 调用，
     ; 使共享的第三声道恢复和声。
@@ -235,6 +250,7 @@ music_trigger_arp:
     rts
 
 ; A=1 为低频噪声鼓，A=2 为较亮的军鼓。两者都使用极短包络。
+; EN: Trigger voice 3 as a short noise drum, temporarily replacing arpeggio use.
 music_trigger_drum:
     ; 输入：A=1 低鼓、A=2 军鼓。X 保存类型；二者共享噪声波形和短包络，
     ; 只用不同频率高字节改变噪声的明暗。

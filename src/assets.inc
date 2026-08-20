@@ -8,6 +8,12 @@
 ; 初学者提示：每个字符固定 8 字节，每个字节是一条从左到右的像素行，bit 7
 ; 是最左像素。`.res 8, value` 保留八字节并填入初值。单色 sprite 固定
 ; 24x21 像素，每行 3 字节，共 63 字节，再补 1 字节对齐到 64。
+;
+; English summary:
+;   The linker fixes CHARSET at $2800 and SPRITE at $3000. A character is eight
+;   bytes, bit 7 at the left; a monochrome sprite is 24x21 pixels (63 bytes) plus
+;   one alignment byte. Labels marked as runtime glyphs or writable dial storage
+;   may change; all other bytes are immutable templates and lookup tables.
 
 .segment "CHARSET"
 

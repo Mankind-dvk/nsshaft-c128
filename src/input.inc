@@ -9,11 +9,17 @@
 ;
 ; 这里不做移动判断，只产生一个稳定的 potx_raw。这样玩家和 HUD 必然读取
 ; 同一帧的值，不会因各自再次访问 SID 而得到不同结果。
+;
+; English summary:
+;   Selects control port 1 for SID POT conversion and publishes one raw POTX byte
+;   per frame. This module does not interpret movement. Player physics and the
+;   HUD therefore consume the same sampled value instead of reading SID twice.
 
 .segment "CODE"
 
 ; Paddle 输入 ---------------------------------------------------------------
 
+; EN: Configure CIA directions/selection for port-1 paddle POT and buttons.
 initialize_paddles:
     ; 输出：CIA1 PA6/PA7 配置为端口选择输出，PB2..PB4 配置为按钮输入。
     ; OR 用来只置位目标 bit，AND 用来只清除目标 bit，其他 CIA 引脚保持原值。
@@ -32,6 +38,7 @@ initialize_paddles:
     sta CIA1_DDR_B
     rts
 
+; EN: Read one SID POTX sample into potx_raw; test builds may override it.
 read_paddle_x:
     ; 输出：potx_raw = SID_POTX 的 0..255 转换结果。
     ; SID 的 POT ADC 不是瞬时完成的；切换控制端口后用短循环等待读数稳定。

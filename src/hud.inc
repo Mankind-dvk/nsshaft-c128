@@ -12,11 +12,17 @@
 ; HUD 同时写 SCREEN_A 和 SCREEN_B，因为 $d018 随滚动翻页。Color RAM 只有
 ; 一份，不需要双写。表针的五个方向模板位于 assets.inc，每次换档才复制，
 ; 档位不变时不会重复搬运 63 字节。
+;
+; English summary:
+;   Renders POTX:xxx into both screen buffers and maintains the fixed character
+;   dial. Only its red hand uses hardware sprite 4. Five pointer templates are
+;   copied into one writable sprite block only when the paddle range changes.
 
 .segment "CODE"
 
 ; POTX 数值显示 -------------------------------------------------------------
 
+; EN: Write the fixed POTX:000 label to both screen matrices.
 initialize_hud:
     ; 输出：两张屏幕右上角都有 POTX:000，八个字符的颜色统一为白色。
     ; 状态栏内部恰好有八列，直接写入 "POTX:000"。两个屏幕缓冲区都
@@ -39,6 +45,7 @@ initialize_hud:
     bne @color
     rts
 
+; EN: Convert potx_raw to three decimal digits and update both buffers.
 update_potx_display:
     ; 输入：potx_raw（0..255）。输出：右上角三个十进制数字。
     ; 6502 没有除法指令，因此先循环减 100 得百位，再循环减 10 得十位；
@@ -102,6 +109,7 @@ update_potx_display:
 
 ; 固定 paddle 仪表盘 --------------------------------------------------------
 
+; EN: Initialize sprite 4 and force the first five-position hand update.
 initialize_dashboard:
     ; 输出：sprite 4 指向可写的 PADDLE_POINTER_ADDRESS，启用 X 两倍宽并设置
     ; 固定位置。$d010 的 bit 4 是 sprite 4 的第九个 X 位；bit 0 必须保留给玩家。
@@ -138,6 +146,7 @@ initialize_dashboard:
 
 ; 中央继续使用玩家控制的 108..148 死区；两侧再各分出一个最大斜角，得到
 ; 最左、左、中、右、最右五档。仅切换指针位图，表盘本身始终不动。
+; EN: Map POTX to one of five templates; copy only when the range changes.
 update_dashboard_pointer:
     ; 输入：potx_raw。输出：dashboard_pointer_state=0..4，并在档位变化时把
     ; 对应的 63 字节单色位图复制到 sprite 4 的可写块。

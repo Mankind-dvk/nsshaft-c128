@@ -11,11 +11,19 @@
 ; 坐标约定：player_x_low/high 是 VIC 的 9 位绝对 sprite X；player_y 是
 ; 21 像素高 sprite 的顶边。垂直速度使用 1/8 像素定点数。平台为单向支撑：
 ; 上升时不检测头顶平台，只有下落脚底接近平台顶部时才允许着陆。
+;
+; English summary:
+;   Owns sprite 0, 9-bit X coordinates, 1/8-pixel vertical physics, landing, and
+;   platform behavior dispatch. Platforms support only from above. Feet are
+;   sampled at two X offsets; collision results 1..7 identify normal, spikes,
+;   inactive/active fade, spring, and left/right conveyor support. Conveyor and
+;   paddle counters are independent, so their average horizontal speeds add.
 
 .segment "GAMEPLAY"
 
 ; 玩家 sprite ---------------------------------------------------------------
 
+; EN: Configure sprite 0 and center it on the forced-safe spawn platform.
 initialize_player:
     ; 输入：seed_platforms 留下的最低平台 start/width，fine_scroll=7。
     ; 输出：配置硬件 sprite 0，并把玩家水平居中放到第 22 行出生平台。
@@ -47,6 +55,7 @@ initialize_player:
 ; 根据最终的逐帧物理状态选择 sprite 0 的一帧。下落优先于水平输入；
 ; 站在平台上时，paddle 死区显示 normal，死区两侧显示 left/right。
 ; 两张屏幕的指针表必须同步更新，否则 D018 双缓冲翻页时人物会闪回旧帧。
+; EN: Select fall/normal/left/right bitmap and mirror both sprite pointer tables.
 update_player_sprite_frame:
     ; 输入：player_on_platform 与 potx_raw。输出：同步修改 A/B 两张屏幕的
     ; sprite 0 指针。这里只换位图块号，不复制 63 字节，所以每帧成本很低。
@@ -75,6 +84,7 @@ update_player_sprite_frame:
     rts
 
 ; 将玩家放置到 spawn_row 中由 platform_start/platform_width 指定的平台上。
+; EN: Convert platform columns/row to 9-bit sprite coordinates and supported state.
 position_player_on_platform:
     ; 输入：spawn_row、platform_start、platform_width。
     ; 输出：player_x/player_y 与硬件 sprite 坐标；玩家进入“受平台支撑”状态。
@@ -125,6 +135,7 @@ position_player_on_platform:
     sta player_on_platform
     rts
 
+; EN: Apply five-range paddle movement with independent delay and boundary clamps.
 update_player_horizontal:
     ; 输入：potx_raw。输出：必要时修改 9 位 player_x 并写 VIC。
     ; 中立区清零计数器，使下一次离开死区可以立即移动。最外两档只改变等待
@@ -201,6 +212,7 @@ update_player_horizontal:
 
 ; NS-Shaft 垂直运动 ---------------------------------------------------------
 
+; EN: Run supported, spring-rise, gravity, landing, and game-over state transitions.
 update_player_vertical:
     ; 这是玩家垂直状态机，按顺序处理三种互斥状态：
     ;   1. player_on_platform != 0：检查支撑和顶框；
@@ -446,6 +458,7 @@ update_player_vertical:
     sta player_on_platform
     rts
 
+; EN: Set the deferred game-over flag without escaping the current JSR stack.
 request_game_over:
     ; 不在物理例程中直接清屏。置位后返回主循环，可避免从多层 JSR 中强行
     ; 跳走并留下不平衡的返回地址。
@@ -461,6 +474,7 @@ request_game_over:
 ; 保留平台原来的逻辑行，UPPER 只绘制越过字符边界的像素。碰撞必须始终
 ; 使用 LOWER 所在行作为锚点；如果把 UPPER 也视作平台，小人会先在上一
 ; 字符行落地，视觉上比真实平台顶部高 8 像素。
+; EN: Convert feet Y to a row, sample two X points, and return collision type in A.
 find_platform_below_player:
     ; 输入：player_x、player_y、fine_scroll、active_screen。
     ; 输出：A=碰撞类型，并保存 collision_row/type 供着陆和平台效果使用。
@@ -511,6 +525,7 @@ find_platform_below_player:
     lda #0
     rts
 
+; EN: Point ROW_PTR at collision_row in the currently visible screen matrix.
 set_collision_row_pointer:
     ; 输入：collision_row、active_screen。输出：ROW_PTR 指向当前可见屏幕的
     ; 对应字符行。advance_row_pointer 每次增加 40 字节，即前进一整行。
@@ -537,6 +552,7 @@ set_collision_row_pointer:
     rts
 
 ; 输入 A 为 24 像素宽 sprite 内部的 X 偏移。
+; EN: Convert a sprite-relative X offset to a column and classify its anchor cell.
 sample_platform_at_player_offset:
     ; 输入：A=相对 sprite 左边的像素偏移（当前调用为 5 和 18）。
     ; 输出：A=该脚点下方的逻辑平台类型。
@@ -624,6 +640,7 @@ sample_platform_at_player_offset:
 
 ; collision_type 已由本帧脚底采样确定。传送位移不使用 paddle 的节流计数器：
 ; 推动一次后独立跳过两帧，得到每三帧两像素；抵达竖井边缘时钳制。
+; EN: Push two pixels every three calls in collision_type's conveyor direction.
 apply_conveyor_motion:
     lda conveyor_move_counter
     beq @ready
@@ -685,6 +702,7 @@ apply_conveyor_motion:
 
 ; 查找画面中最低的普通平台并将玩家放到上面。玩家碰到尖刺或离开竖井后
 ; 使用此流程重新定位。
+; EN: Return C=1 when paddle movement is due; reload normal or fast delay.
 player_movement_ready:
     ; 输出：C=1 表示本帧允许移动，C=0 表示仍在等待；调用者用 BCC 判断。
     ; SEC/CLC 在这里相当于一个布尔返回值，不是为后续加减法准备进位。
@@ -709,6 +727,7 @@ player_movement_ready:
     sec
     rts
 
+; EN: Write the software 9-bit X coordinate without disturbing sprite 4's high bit.
 write_player_x:
     ; 把 9 位软件坐标写入 VIC：低八位写 $d000；高位写 $d010 bit 0。
     ; AND 只清玩家的 bit 0，绝不能破坏 sprite 4 表针使用的 bit 4。

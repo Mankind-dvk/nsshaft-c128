@@ -8,6 +8,12 @@
 ; `.byte value` 会在 PRG 中保留一个可写字节并给它贴上标签。6502 没有局部
 ; 栈变量或结构体语法，所以这里按子系统分组，相当于游戏的全局状态结构。
 ; 注释中的“布尔值”约定 0=false、非 0=true。
+;
+; English summary:
+;   This file is the program's writable global-state structure. `.byte` reserves
+;   one initialized RAM byte. State is grouped by subsystem; Boolean values use
+;   zero for false and nonzero for true. Every subsystem must reset its bytes
+;   from new_game instead of relying on values left by the previous round.
 
 .segment "CODE"
 

@@ -13,9 +13,17 @@
 ; 双缓冲模型：active_screen 指出的矩阵正在被 VIC 显示，所有大规模转场先写
 ; 另一张隐藏矩阵，完成后只改一次 $d018。Color RAM 没有第二份，所以弹簧
 ; 紫色只在对应字符确实移动时同步更新，不能像屏幕矩阵那样整页翻转。
+;
+; English summary:
+;   Owns double-buffered VIC-IIe text rendering, dynamic glyph scroll phases,
+;   fixed UI construction, and modal screens. active_screen is visible; large
+;   transitions are written to the other matrix and exposed with one $d018
+;   write. Color RAM is shared, so colored spring/conveyor cells are moved
+;   explicitly. Software fine_scroll never changes the fixed HUD's $d011 phase.
 
 .segment "CODE"
 
+; EN: Advance the playfield by one pixel and carry a supported player upward.
 scroll_one_pixel_up:
     ; 输入：fine_scroll=0..7、active_screen、player_on_platform。
     ; 输出：世界向上推进一个像素。相位 7 开始一次跨字符行转场，相位 6..1
@@ -54,6 +62,7 @@ scroll_one_pixel_up:
 ; VIC 垂直滚动寄存器始终保持自然相位 3，使 25 行字符完整覆盖可视区。
 ; 普通/未触发灰色平台共用一对矩形碎片；已触发平台使用另一对矩形碎片，
 ; 尖刺、弹簧和左右传送平台各自生成保持图案形状的动态碎片。
+; EN: Rebuild every platform's runtime UPPER/LOWER bitmaps for fine_scroll.
 update_fragment_glyphs:
     ; 输入：fine_scroll。输出：重写普通、尖刺、消失、弹簧和传送平台碎片。
     ; 屏幕码保持不变时，修改字形 RAM 会立即改变所有引用该字形的单元格，
@@ -121,6 +130,7 @@ update_fragment_glyphs:
     jsr update_conveyor_fragment_glyphs
     jmp update_spring_fragment_glyphs
 
+; EN: Make the hidden screen a complete copy of the active screen.
 prepare_screen_b_from_a:
 copy_active_to_hidden:
     ; 输入：active_screen。输出：隐藏屏成为可见屏的 1000 字节完整副本。
@@ -139,6 +149,7 @@ copy_active_to_hidden:
     bne @row
     rts
 
+; EN: Set ROW_PTR=visible and DEST_PTR=hidden according to active_screen.
 set_screen_copy_pointers:
     ; 输出：ROW_PTR=当前可见屏，DEST_PTR=隐藏屏。后续代码统一使用间接寻址，
     ; 无需为 A->B 和 B->A 写两套循环。
@@ -164,6 +175,7 @@ set_screen_copy_pointers:
     sta DEST_PTR+1
     rts
 
+; EN: Add one 40-byte row to ROW_PTR and DEST_PTR.
 advance_copy_pointers:
     ; 将 ROW_PTR 和 DEST_PTR 同时增加 40。ADC 前必须 CLC；低字节溢出时再
     ; INC 高字节，这是 6502 实现 16 位加法的标准写法。
@@ -183,6 +195,7 @@ advance_copy_pointers:
 @done:
     rts
 
+; EN: Advance source, destination, and look-ahead row pointers together.
 advance_transition_pointers:
     ; 在 advance_copy_pointers 基础上，再推进 NEXT_ROW_PTR。开始转场时它
     ; 始终指向源行的下一行，用来判断空白格下方是否有完整平台。
@@ -198,6 +211,7 @@ advance_transition_pointers:
 
 ; 屏幕 A/B 的地址低十位都与 Color RAM 对应，因此保留低字节，并把高字节
 ; 的低两位映射到 $d8..$db，即可得到当前目标行的颜色指针。
+; EN: Map DEST_PTR's low 10 address bits to the corresponding Color RAM cell.
 set_color_pointer_from_dest:
     ; 输入：DEST_PTR 指向某个屏幕行。输出：COLOR_PTR 指向同一行的 Color RAM。
     lda DEST_PTR
@@ -208,6 +222,7 @@ set_color_pointer_from_dest:
     sta COLOR_PTR+1
     rts
 
+; EN: Add one 40-byte row to COLOR_PTR.
 advance_color_pointer:
     ; COLOR_PTR += 40；与目标屏幕行保持同步。
     clc
@@ -220,6 +235,7 @@ advance_color_pointer:
     rts
 
 ; 相位 1 将每个完整平台替换为下部碎片，并在上一字符行插入对应的上部碎片。
+; EN: Convert FULL cells to LOWER and insert UPPER cells in the hidden buffer.
 start_fragment_transition:
     ; 相位 7->6 时调用。对每个游戏区单元格执行：
     ;   当前行完整平台 -> 当前行 LOWER；
@@ -382,6 +398,7 @@ start_fragment_transition:
 
 ; 相位 7 完成后，上部碎片在上移一行的位置变为完整字符，下部碎片消失；
 ; 此时可以从画面底部加入新平台。
+; EN: Promote UPPER to FULL, erase LOWER, and generate the new bottom row.
 complete_fragment_transition:
     ; 相位 0->7 时调用。UPPER 在上移后的字符行变回 FULL，LOWER 清为空白，
     ; 从而完成“像素滚动八次等于字符行上移一次”。随后重建最底逻辑行。
@@ -511,6 +528,7 @@ complete_fragment_transition:
     sta ROW_PTR+1
     jmp generate_bottom_row
 
+; EN: Toggle active_screen and select its matrix with one $d018 write.
 flip_hidden_screen:
     ; active_screen ^= 1。EOR #1 是切换 0/1 的常见写法；随后写 $d018 选择
     ; 对应屏幕矩阵。字符集地址不变，所以只需两个预计算常量。
@@ -528,6 +546,7 @@ flip_hidden_screen:
     sta VIC_MEMORY_POINTERS
     rts
 
+; EN: Clear the hidden bottom row and optionally generate a random platform.
 generate_bottom_row:
     ; 输入：ROW_PTR 指向刚完成粗滚动后的隐藏屏底部游戏行。
     ; 输出：清空该行；rows_until_platform=0 时调用随机生成并重新装载间距。
@@ -554,6 +573,7 @@ generate_bottom_row:
 
 ; 不滚动的开始与游戏结束画面 ---------------------------------------------
 
+; EN: Restore modal glyphs, clear both matrices, and draw the title screen.
 show_start_screen:
     ; 模态画面：关闭 sprite、固定显示 SCREEN_A、清两屏，再写标题和提示。
     jsr restore_modal_font_glyphs
@@ -577,6 +597,7 @@ show_start_screen:
     bne @title
     jmp draw_action_prompt
 
+; EN: Restore modal glyphs, clear gameplay, and draw the game-over screen.
 show_game_over_screen:
     ; 与开始画面相同，但标题使用红色。游戏世界不会在此期间继续滚动。
     jsr restore_modal_font_glyphs
@@ -599,6 +620,7 @@ show_game_over_screen:
     cpx #9
     bne @title
 
+; EN: Mirror the ten-character action prompt into both screen buffers.
 draw_action_prompt:
     ; 同一份十字符提示写入 A/B；这样从菜单返回前无论 D018 原值如何都一致。
     ldx #0
@@ -615,6 +637,7 @@ draw_action_prompt:
 
 ; 接受控制端口 1 上的 paddle 按钮 1/2 和摇杆 FIRE。按下前后都等待按钮
 ; 释放，可防止一次按键连续跳过两个画面。
+; EN: Wait for release -> press -> release to debounce and prevent carry-over.
 wait_for_action_button:
     ; 依次等待“已释放 -> 按下 -> 再释放”，形成软件去抖和边沿触发。若只等
     ; 按下，上一画面的同一次长按会立刻跳过下一画面。
@@ -632,6 +655,7 @@ wait_for_action_button:
     bcs @wait_final_release
     rts
 
+; EN: Return C=1 when any port-1 paddle/fire action button is active.
 action_button_pressed:
     ; 输出：C=1 有任一动作按钮按下，C=0 全部释放。按钮低电平有效，因此
     ; PB2..PB4 全为 1 才表示没有按键。
@@ -645,6 +669,7 @@ action_button_pressed:
     clc
     rts
 
+; EN: Clear both 1 KiB matrices and the complete 1 KiB Color RAM region.
 clear_screens_and_colors:
     ; X 从 0 自增到溢出，恰好遍历 256 个偏移；四个页面合计覆盖每个 1 KB
     ; 屏幕区和 Color RAM。最后 24 个非可见字节也清零，包含 sprite 指针表，
@@ -673,6 +698,7 @@ clear_screens_and_colors:
 ; 参考旧版 NS-Shaft 的固定字符框：硬件边框为黑色，屏幕第 1/23 行与
 ; 第 1/38 列组成青色外框，第 29 列分隔游戏区和八列状态栏。第 0/24 行
 ; 以及第 0/39 列保留黑色，形成参考图中的外侧留白。
+; EN: Draw the cyan frame/divider, POTX area, and fixed character dial.
 initialize_ui:
     ; 输出：两张屏幕都有完全相同的青色框、分隔列、POTX 区和字符表盘。
     ; 水平线适合绝对地址+X；垂直线适合三个行指针+固定 Y 列，这展示了两种
@@ -769,6 +795,7 @@ initialize_ui:
     bne @dial_row_3
     rts
 
+; EN: Add one 40-byte row to ROW_PTR only.
 advance_row_pointer:
     ; 只推进 ROW_PTR，一般用于碰撞查询从屏幕基址走到指定字符行。
     clc

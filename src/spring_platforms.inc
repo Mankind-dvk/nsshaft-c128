@@ -11,11 +11,18 @@
 ;
 ; 与消失平台一样，弹簧效果必须同时识别 FULL/UPPER/LOWER 三种表示。区别是
 ; 弹簧不删除平台，只在 normal 与 compressed 两套屏幕码之间来回转换。
+;
+; English summary:
+;   Builds smooth-scroll fragments for normal and compressed I-shaped springs.
+;   Landing records the anchor row, transforms both buffers, and starts an
+;   eight-frame compression timer. Expiry restores the glyph and assigns upward
+;   speed; walking away restores it without launching.
 
 .segment "GAMEPLAY"
 
 ; 根据 video.inc 已算好的 fragment_split/fragment_count，同时重建普通和
 ; 压扁弹簧的上下滚动碎片。0 是黑色背景，复制进来的 1 位显示紫色弹簧。
+; EN: Rebuild normal and compressed spring UPPER/LOWER glyphs for this phase.
 update_spring_fragment_glyphs:
     ; 输入：fragment_split、fragment_count。输出：四个可写动态字形。
     ; 先清零保证未复制部分透明，再把源字形的头部放入 UPPER、尾部放入
@@ -56,6 +63,7 @@ update_spring_fragment_glyphs:
     bne @lower
     rts
 
+; EN: Reset compression, support, and upward-speed state for a new round.
 initialize_spring_platforms:
     ; 新游戏清除压缩倒计时和上升速度，避免继承上一局的弹跳状态。
     lda #0
@@ -66,6 +74,7 @@ initialize_spring_platforms:
     rts
 
 ; collision_row 始终指向平台下部碎片/完整字符所在的逻辑锚点行。
+; EN: Record collision_row, start the timer, and compress matching cells in both buffers.
 compress_spring_platform:
     ; 输入：collision_row。若当前尚未压缩，记录锚点、装载 8 帧计时，并把
     ; 两张屏幕中该平台的三种 normal 屏幕码替换为 compressed 屏幕码。
@@ -84,6 +93,7 @@ compress_spring_platform:
     rts
 
 ; 走出弹簧时只恢复外形，不发射人物。
+; EN: Restore a compressed spring when the player walks away; do not launch.
 cancel_spring_platform:
     ; 玩家在发射前横向走出平台时调用：恢复图形、清计时，但不赋予上升速度。
     lda player_on_spring
@@ -98,6 +108,7 @@ cancel_spring_platform:
     rts
 
 ; 压缩倒计时结束后恢复“工”字形，并切换到独立的向上运动状态。
+; EN: On timer expiry restore the spring, clear support, and assign upward velocity.
 update_spring_platform:
     ; 每帧调用。倒计时归零时先恢复“工”字形，再清除支撑并设置
     ; player_rise_velocity；实际向上位移由下一帧 update_player_vertical 完成。
@@ -123,6 +134,7 @@ update_spring_platform:
 
 ; 每次完成八像素粗滚动后，平台锚点向上一行。离开游戏区时无需再恢复，
 ; 因为 video.inc 已经把对应碎片从两个屏幕缓冲区中清除。
+; EN: Move the saved anchor up after a coarse row transition or discard it off-screen.
 advance_spring_platform_scroll_position:
     ; 与消失平台相同，每次粗滚动把保存的锚点减一。若平台已越过顶框，屏幕
     ; 转场已经清除图形，这里只需丢弃生命周期状态。
@@ -142,6 +154,7 @@ advance_spring_platform_scroll_position:
 
 ; 两个缓冲区可能一个保存完整字符，另一个保存上下碎片。因此围绕锚点
 ; 扫描三行，并只转换弹簧自己的六种屏幕码，不会影响附近其他平台。
+; EN: Transform spring cells across both buffers and the three-row anchor window.
 apply_spring_effect_to_buffers:
     ; 输入：spring_platform_row、spring_effect_mode。输出：同步修改 A/B 两屏
     ; 锚点附近三行。紫色 Color RAM 不需要改，因为压缩前后都使用同一颜色。
@@ -184,6 +197,7 @@ apply_spring_effect_to_buffers:
     bne @row
     rts
 
+; EN: Pure A-in/A-out mapping between normal and compressed spring screen codes.
 transform_spring_character:
     ; 输入/输出：A=屏幕码。mode=0 将 normal 映射为 compressed；mode=1
     ; 执行反向映射。非弹簧字符原样返回。
