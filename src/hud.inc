@@ -8,12 +8,17 @@
 ; 公共入口：
 ;   initialize_hud、update_potx_display、initialize_dashboard、
 ;   update_dashboard_pointer。
+;
+; HUD 同时写 SCREEN_A 和 SCREEN_B，因为 $d018 随滚动翻页。Color RAM 只有
+; 一份，不需要双写。表针的五个方向模板位于 assets.inc，每次换档才复制，
+; 档位不变时不会重复搬运 63 字节。
 
 .segment "CODE"
 
 ; POTX 数值显示 -------------------------------------------------------------
 
 initialize_hud:
+    ; 输出：两张屏幕右上角都有 POTX:000，八个字符的颜色统一为白色。
     ; 状态栏内部恰好有八列，直接写入 "POTX:000"。两个屏幕缓冲区都
     ; 必须更新，否则平台过渡时切换 D018 会显示旧数字。
     ldx #0
@@ -35,6 +40,9 @@ initialize_hud:
     rts
 
 update_potx_display:
+    ; 输入：potx_raw（0..255）。输出：右上角三个十进制数字。
+    ; 6502 没有除法指令，因此先循环减 100 得百位，再循环减 10 得十位；
+    ; 剩余值就是个位。对最多 255 的输入，这比通用除法例程更小也足够快。
     lda potx_raw
     sta decimal_work
     ldx #0
@@ -95,6 +103,8 @@ update_potx_display:
 ; 固定 paddle 仪表盘 --------------------------------------------------------
 
 initialize_dashboard:
+    ; 输出：sprite 4 指向可写的 PADDLE_POINTER_ADDRESS，启用 X 两倍宽并设置
+    ; 固定位置。$d010 的 bit 4 是 sprite 4 的第九个 X 位；bit 0 必须保留给玩家。
     lda #PADDLE_POINTER_BLOCK
     sta SPRITE_POINTER_A+4
     sta SPRITE_POINTER_B+4
@@ -126,21 +136,34 @@ initialize_dashboard:
     sta VIC_SPRITE_ENABLE
     rts
 
-; 使用与玩家控制完全相同的死区选择向左、居中或向右的表针。仅切换指针
-; 位图，表盘本身始终不动。
+; 中央继续使用玩家控制的 108..148 死区；两侧再各分出一个最大斜角，得到
+; 最左、左、中、右、最右五档。仅切换指针位图，表盘本身始终不动。
 update_dashboard_pointer:
+    ; 输入：potx_raw。输出：dashboard_pointer_state=0..4，并在档位变化时把
+    ; 对应的 63 字节单色位图复制到 sprite 4 的可写块。
+    ; 这里用连续 CMP 从小到大分区，边界值的归属可直接从 BCC 条件看出。
     lda potx_raw
+    cmp #POTX_FAR_LEFT_END
+    bcc @far_left
     cmp #POTX_DEADZONE_LOW
     bcc @left
     cmp #POTX_DEADZONE_HIGH+1
-    bcs @right
-    lda #1
+    bcc @center
+    cmp #POTX_FAR_RIGHT_START
+    bcc @right
+    lda #4
     bne @select
-@left:
+@far_left:
     lda #0
     beq @select
-@right:
+@left:
+    lda #1
+    bne @select
+@center:
     lda #2
+    bne @select
+@right:
+    lda #3
 @select:
     cmp dashboard_pointer_state
     beq @done

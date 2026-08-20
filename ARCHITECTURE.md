@@ -24,6 +24,8 @@ the same generated machine code while making ownership and call flow explicit.
 | `src/hud.inc` | Character POTX display and dial hand |
 | `src/player.inc` | Player sprite, horizontal control, gravity, landing and spike collision |
 | `src/fade_platforms.inc` | Disappearing-platform activation, flashing, scrolling anchor and deletion |
+| `src/spring_platforms.inc` | Spring glyph transitions, compression lifecycle and upward launch |
+| `src/conveyor_platforms.inc` | Left/right conveyor glyph transitions and restoration of reused menu-font slots |
 | `src/music.inc` | PAL raster IRQ, three SID voices, instruments, frequency and pattern tables |
 | `src/assets.inc` | Custom charset, sprite bitmaps, pointer templates, text and lookup tables |
 | `src/state.inc` | Mutable state bytes grouped in one visible RAM layout |
@@ -42,12 +44,13 @@ the same generated machine code while making ownership and call flow explicit.
 `new_game` resets subsystem state in dependency order:
 
 1. clear both screen buffers;
-2. seed and generate platforms;
-3. draw the fixed UI;
-4. initialize POTX display;
-5. create the player and dial hand;
-6. initialize the SID arrangement and install the raster IRQ;
-7. copy the visible screen into the hidden buffer.
+2. reset disappearing- and spring-platform state, then install conveyor glyphs;
+3. seed and generate platforms;
+4. draw the fixed UI;
+5. initialize POTX display;
+6. create the player and dial hand;
+7. initialize the SID arrangement and install the raster IRQ;
+8. copy the visible screen into the hidden buffer.
 
 `main_loop` then runs one deterministic update sequence per frame:
 
@@ -55,9 +58,9 @@ the same generated machine code while making ownership and call flow explicit.
 2. sample POTX;
 3. update the dial hand and POTX digits;
 4. update horizontal player movement;
-5. update gravity and platform collision;
-6. update any activated disappearing platform;
-7. process game over;
+5. update gravity, upward spring motion and platform collision;
+6. update activated disappearing and compressed spring platforms;
+7. select the player animation frame and process game over;
 8. advance platform scrolling at the configured cadence.
 
 The music does not depend on completion of `main_loop`. VIC-IIe raster line 240
@@ -76,7 +79,7 @@ than one display frame.
 | Range | Use |
 | --- | --- |
 | `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
-| `$1d00-$27c6` | Code, tables and mutable state |
+| `$1d00-$269a` | Main loop, video, platform generation, HUD, tables and mutable state |
 | `$2800-$29ff` | 64-character custom character set |
 | `$2a00-$2dae` | SID player, frequency tables and 16-bar arrangement |
 | `$2e00-$2f37` | Disappearing-platform effect routines |
@@ -85,6 +88,7 @@ than one display frame.
 | `$3080-$30bf` | Player facing/moving right frame |
 | `$30c0-$30ff` | Player facing/moving left frame |
 | `$3100-$313f` | Writable dial-hand block |
+| `$3140-$37a7` | Player physics, spring-platform and conveyor-platform routines |
 | `$0400-$07ff` | Screen buffer A and its sprite pointers |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointers |
 | `$d800-$dbff` | Shared VIC color RAM |
@@ -114,13 +118,30 @@ The four player animation blocks are memory frames selected by hardware sprite
 - The status panel is never included in platform transitions or collision scans.
 - Activated disappearing platforms use character indices 60-62; untriggered
   gray platforms continue to use the shared rectangular transition glyphs.
+- Spring platforms reuse six character slots that were blank inside the dial
+  tiles. The dial screen-code tables substitute character 0 at those cells.
+- Spring cells use purple Color RAM foreground; fragment transitions move that
+  color one row upward with the spring while all other platform masks stay black.
+- Conveyor cells use green Color RAM foreground and black cut-out arrows. During
+  gameplay they reuse character slots 19-22; menu entry restores the original
+  N/S/-/H glyphs before drawing any title or prompt text.
+- Each conveyor direction shares its FULL character with its LOWER transition
+  fragment. The full arrow bitmap must be restored before a completed coarse
+  scroll is flipped to the visible screen.
+- Conveyor support is resolved inside the vertical collision state machine and
+  uses an independent delay counter to push two pixels every three frames after
+  the normal paddle movement.
+- A compressed spring is transformed in both screen buffers and across the
+  three-row transition window; walking off restores it without launching.
 - `$d011` remains at phase 3; UI characters must never use the platform's
   software `fine_scroll` phase.
 - `fine_scroll` describes the custom-glyph transition phase; it is not written
   into the low bits of `$d011`.
 - Player collision and sprite Y positions use the same
   `SCREEN_ROW0_BASE_Y + fine_scroll` coordinate model.
-- Paddle movement and dial direction use the same dead-zone constants.
+- Paddle movement and the five dial angles share the same dead-zone and outer
+  speed thresholds. The two extreme ranges use a one-frame movement delay;
+  inner left/right ranges retain the two-frame delay.
 - The music IRQ must not use shared zero-page scratch locations.
 - Lead, bass and arpeggio patterns must each contain exactly 128 steps.
 - The music segment must end below `$3000`, where sprite data begins.

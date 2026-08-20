@@ -3,16 +3,23 @@
 ; ---------------------------------------------------------------------------
 ; 本模块负责平台逐像素平滑过渡、双缓冲屏幕复制、开始/结束画面、固定列
 ; 分隔条，以及字符表盘的放置。硬件 D011 固定在 25 行模式的自然相位 3；
-; 平滑运动改由实时改写四个过渡字形实现。
+; 平滑运动改由实时改写各平台类型的上下过渡字形实现。
 ;
 ; 公共入口：
 ;   scroll_one_pixel_up、prepare_screen_b_from_a、show_start_screen、
 ;   show_game_over_screen、wait_for_action_button、clear_screens_and_colors、
 ;   initialize_ui。
+;
+; 双缓冲模型：active_screen 指出的矩阵正在被 VIC 显示，所有大规模转场先写
+; 另一张隐藏矩阵，完成后只改一次 $d018。Color RAM 没有第二份，所以弹簧
+; 紫色只在对应字符确实移动时同步更新，不能像屏幕矩阵那样整页翻转。
 
 .segment "CODE"
 
 scroll_one_pixel_up:
+    ; 输入：fine_scroll=0..7、active_screen、player_on_platform。
+    ; 输出：世界向上推进一个像素。相位 7 开始一次跨字符行转场，相位 6..1
+    ; 只重画动态字形，相位 0 完成粗滚动并翻页。
     ; 玩家站在平台上时，会随滚动平台一起向上移动。
     lda player_on_platform
     beq @scroll_playfield
@@ -41,12 +48,16 @@ scroll_one_pixel_up:
     sta fine_scroll
     jsr complete_fragment_transition
     jsr advance_fade_platform_scroll_position
+    jsr advance_spring_platform_scroll_position
     jmp flip_hidden_screen
 
 ; VIC 垂直滚动寄存器始终保持自然相位 3，使 25 行字符完整覆盖可视区。
 ; 普通/未触发灰色平台共用一对矩形碎片；已触发平台使用另一对矩形碎片，
-; 尖刺平台使用自己的三角形碎片。每帧改写这些字形即可推进像素相位。
+; 尖刺、弹簧和左右传送平台各自生成保持图案形状的动态碎片。
 update_fragment_glyphs:
+    ; 输入：fine_scroll。输出：重写普通、尖刺、消失、弹簧和传送平台碎片。
+    ; 屏幕码保持不变时，修改字形 RAM 会立即改变所有引用该字形的单元格，
+    ; 因此中间六个像素相位不需要遍历整个屏幕矩阵。
     lda fine_scroll
     clc
     adc #1
@@ -107,10 +118,13 @@ update_fragment_glyphs:
     iny
     cpx #8
     bne @spike_lower
-    rts
+    jsr update_conveyor_fragment_glyphs
+    jmp update_spring_fragment_glyphs
 
 prepare_screen_b_from_a:
 copy_active_to_hidden:
+    ; 输入：active_screen。输出：隐藏屏成为可见屏的 1000 字节完整副本。
+    ; 主要在新游戏开始时调用；运行中的转场只复制游戏区所需单元格。
     jsr set_screen_copy_pointers
     ldx #SCREEN_ROWS
 @row:
@@ -126,6 +140,8 @@ copy_active_to_hidden:
     rts
 
 set_screen_copy_pointers:
+    ; 输出：ROW_PTR=当前可见屏，DEST_PTR=隐藏屏。后续代码统一使用间接寻址，
+    ; 无需为 A->B 和 B->A 写两套循环。
     lda active_screen
     beq @a_to_b
     lda #<SCREEN_B
@@ -149,6 +165,8 @@ set_screen_copy_pointers:
     rts
 
 advance_copy_pointers:
+    ; 将 ROW_PTR 和 DEST_PTR 同时增加 40。ADC 前必须 CLC；低字节溢出时再
+    ; INC 高字节，这是 6502 实现 16 位加法的标准写法。
     clc
     lda ROW_PTR
     adc #SCREEN_COLUMNS
@@ -166,6 +184,8 @@ advance_copy_pointers:
     rts
 
 advance_transition_pointers:
+    ; 在 advance_copy_pointers 基础上，再推进 NEXT_ROW_PTR。开始转场时它
+    ; 始终指向源行的下一行，用来判断空白格下方是否有完整平台。
     jsr advance_copy_pointers
     clc
     lda NEXT_ROW_PTR
@@ -176,8 +196,36 @@ advance_transition_pointers:
 @done:
     rts
 
+; 屏幕 A/B 的地址低十位都与 Color RAM 对应，因此保留低字节，并把高字节
+; 的低两位映射到 $d8..$db，即可得到当前目标行的颜色指针。
+set_color_pointer_from_dest:
+    ; 输入：DEST_PTR 指向某个屏幕行。输出：COLOR_PTR 指向同一行的 Color RAM。
+    lda DEST_PTR
+    sta COLOR_PTR
+    lda DEST_PTR+1
+    and #%00000011
+    ora #>COLOR_RAM
+    sta COLOR_PTR+1
+    rts
+
+advance_color_pointer:
+    ; COLOR_PTR += 40；与目标屏幕行保持同步。
+    clc
+    lda COLOR_PTR
+    adc #SCREEN_COLUMNS
+    sta COLOR_PTR
+    bcc @done
+    inc COLOR_PTR+1
+@done:
+    rts
+
 ; 相位 1 将每个完整平台替换为下部碎片，并在上一字符行插入对应的上部碎片。
 start_fragment_transition:
+    ; 相位 7->6 时调用。对每个游戏区单元格执行：
+    ;   当前行完整平台 -> 当前行 LOWER；
+    ;   当前行空白且下一行有完整平台 -> 当前行 UPPER；
+    ;   其他字符 -> 原样或空白。
+    ; 结果写隐藏屏，循环结束后由调用者 flip_hidden_screen 一次性显示。
     jsr set_screen_copy_pointers
     ; 青色框占据第 1/23 行，平台只允许在第 2..22 行滚动。跳过前两行也
     ; 会让最上方平台自然消失在框线后面，而不是覆盖顶框。
@@ -190,6 +238,7 @@ start_fragment_transition:
     lda ROW_PTR+1
     adc #0
     sta NEXT_ROW_PTR+1
+    jsr set_color_pointer_from_dest
 
     ldx #PLAYFIELD_ROW_COUNT
 @row:
@@ -207,12 +256,22 @@ start_fragment_transition:
     beq @fade_active_red_lower
     cmp #CHAR_FADE_ACTIVE_GRAY_FULL
     beq @fade_active_gray_lower
+    cmp #CHAR_SPRING_FULL
+    beq @spring_lower
+    cmp #CHAR_SPRING_COMPRESSED_FULL
+    beq @spring_compressed_lower
+    cmp #CHAR_CONVEYOR_LEFT_FULL
+    beq @conveyor_left_lower
+    cmp #CHAR_CONVEYOR_RIGHT_FULL
+    beq @conveyor_right_lower
     ; 游戏区中若以后加入其他固定字符，原样复制到隐藏屏。
     jmp @store
 
 @check_next_row:
     cpx #1
-    beq @store
+    bne @read_next_row
+    jmp @store
+@read_next_row:
     lda (NEXT_ROW_PTR), y
     beq @blank
     cmp #CHAR_PLATFORM_FULL
@@ -225,6 +284,14 @@ start_fragment_transition:
     beq @fade_active_red_upper
     cmp #CHAR_FADE_ACTIVE_GRAY_FULL
     beq @fade_active_gray_upper
+    cmp #CHAR_SPRING_FULL
+    beq @spring_upper
+    cmp #CHAR_SPRING_COMPRESSED_FULL
+    beq @spring_compressed_upper
+    cmp #CHAR_CONVEYOR_LEFT_FULL
+    beq @conveyor_left_upper
+    cmp #CHAR_CONVEYOR_RIGHT_FULL
+    beq @conveyor_right_upper
 @blank:
     lda #CHAR_BLANK
     beq @store
@@ -243,6 +310,26 @@ start_fragment_transition:
 @fade_active_gray_lower:
     lda #CHAR_FADE_ACTIVE_GRAY_LOWER
     bne @store
+@spring_lower:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_LOWER
+    bne @store
+@spring_compressed_lower:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_COMPRESSED_LOWER
+    bne @store
+@conveyor_left_lower:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_LEFT_FULL
+    bne @store
+@conveyor_right_lower:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_RIGHT_FULL
+    bne @store
 @normal_upper:
     lda #CHAR_NORMAL_UPPER
     bne @store
@@ -257,29 +344,59 @@ start_fragment_transition:
     bne @store
 @fade_active_gray_upper:
     lda #CHAR_FADE_ACTIVE_GRAY_UPPER
+    bne @store
+@spring_upper:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_UPPER
+    bne @store
+@spring_compressed_upper:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_COMPRESSED_UPPER
+    bne @store
+@conveyor_left_upper:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_LEFT_UPPER
+    bne @store
+@conveyor_right_upper:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_RIGHT_UPPER
 @store:
     sta (DEST_PTR), y
 @next_column:
     dey
     cpy #PLAYFIELD_FIRST_COLUMN
-    bcs @column
+    bcc @row_done
+    jmp @column
+@row_done:
     jsr advance_transition_pointers
+    jsr advance_color_pointer
     dex
-    bne @row
+    beq @done
+    jmp @row
+@done:
     rts
 
 ; 相位 7 完成后，上部碎片在上移一行的位置变为完整字符，下部碎片消失；
 ; 此时可以从画面底部加入新平台。
 complete_fragment_transition:
+    ; 相位 0->7 时调用。UPPER 在上移后的字符行变回 FULL，LOWER 清为空白，
+    ; 从而完成“像素滚动八次等于字符行上移一次”。随后重建最底逻辑行。
     jsr set_screen_copy_pointers
     jsr advance_copy_pointers
     jsr advance_copy_pointers
+    jsr set_color_pointer_from_dest
     ldx #PLAYFIELD_ROW_COUNT
 @row:
     ldy #PLAYFIELD_LAST_COLUMN
 @column:
     lda (ROW_PTR), y
-    beq @store
+    bne @classify
+    jmp @store
+@classify:
     cmp #CHAR_NORMAL_UPPER
     beq @normal_full
     cmp #CHAR_SPIKE_UPPER
@@ -290,6 +407,14 @@ complete_fragment_transition:
     beq @fade_active_red_full
     cmp #CHAR_FADE_ACTIVE_GRAY_UPPER
     beq @fade_active_gray_full
+    cmp #CHAR_SPRING_UPPER
+    beq @spring_full
+    cmp #CHAR_SPRING_COMPRESSED_UPPER
+    beq @spring_compressed_full
+    cmp #CHAR_CONVEYOR_LEFT_UPPER
+    beq @conveyor_left_full
+    cmp #CHAR_CONVEYOR_RIGHT_UPPER
+    beq @conveyor_right_full
     cmp #CHAR_NORMAL_LOWER
     beq @blank
     cmp #CHAR_SPIKE_LOWER
@@ -299,7 +424,23 @@ complete_fragment_transition:
     cmp #CHAR_FADE_ACTIVE_RED_LOWER
     beq @blank
     cmp #CHAR_FADE_ACTIVE_GRAY_LOWER
+    beq @blank
+    cmp #CHAR_SPRING_LOWER
+    beq @spring_blank
+    cmp #CHAR_SPRING_COMPRESSED_LOWER
+    beq @spring_blank
+    cmp #CHAR_CONVEYOR_LEFT_FULL
+    beq @conveyor_blank
+    cmp #CHAR_CONVEYOR_RIGHT_FULL
+    beq @conveyor_blank
     bne @store
+@spring_blank:
+    lda #COLOR_BLACK
+    sta (COLOR_PTR), y
+    beq @blank
+@conveyor_blank:
+    lda #COLOR_BLACK
+    sta (COLOR_PTR), y
 @blank:
     lda #CHAR_BLANK
     beq @store
@@ -317,15 +458,44 @@ complete_fragment_transition:
     bne @store
 @fade_active_gray_full:
     lda #CHAR_FADE_ACTIVE_GRAY_FULL
+    bne @store
+@spring_full:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_FULL
+    bne @store
+@spring_compressed_full:
+    lda #COLOR_PURPLE
+    sta (COLOR_PTR), y
+    lda #CHAR_SPRING_COMPRESSED_FULL
+    bne @store
+@conveyor_left_full:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_LEFT_FULL
+    bne @store
+@conveyor_right_full:
+    lda #COLOR_GREEN
+    sta (COLOR_PTR), y
+    lda #CHAR_CONVEYOR_RIGHT_FULL
 @store:
     sta (DEST_PTR), y
 @next_column:
     dey
     cpy #PLAYFIELD_FIRST_COLUMN
-    bcs @column
+    bcc @row_done
+    jmp @column
+@row_done:
     jsr advance_copy_pointers
+    jsr advance_color_pointer
     dex
-    bne @row
+    beq @rows_done
+    jmp @row
+@rows_done:
+
+    ; 传送平台的 FULL 槽在过渡阶段兼任 LOWER；在底部生成新平台和翻屏前
+    ; 恢复完整箭头，否则新字符会短暂显示成只剩一行的碎片。
+    jsr restore_conveyor_full_glyphs
 
     lda active_screen
     beq @bottom_b
@@ -342,6 +512,8 @@ complete_fragment_transition:
     jmp generate_bottom_row
 
 flip_hidden_screen:
+    ; active_screen ^= 1。EOR #1 是切换 0/1 的常见写法；随后写 $d018 选择
+    ; 对应屏幕矩阵。字符集地址不变，所以只需两个预计算常量。
     lda active_screen
     eor #1
     sta active_screen
@@ -357,6 +529,8 @@ flip_hidden_screen:
     rts
 
 generate_bottom_row:
+    ; 输入：ROW_PTR 指向刚完成粗滚动后的隐藏屏底部游戏行。
+    ; 输出：清空该行；rows_until_platform=0 时调用随机生成并重新装载间距。
     lda #CHAR_BLANK
     ldy #PLAYFIELD_LAST_COLUMN
 @clear:
@@ -381,6 +555,8 @@ generate_bottom_row:
 ; 不滚动的开始与游戏结束画面 ---------------------------------------------
 
 show_start_screen:
+    ; 模态画面：关闭 sprite、固定显示 SCREEN_A、清两屏，再写标题和提示。
+    jsr restore_modal_font_glyphs
     lda #0
     sta VIC_SPRITE_ENABLE
     lda #SCREEN_A_D018
@@ -402,6 +578,8 @@ show_start_screen:
     jmp draw_action_prompt
 
 show_game_over_screen:
+    ; 与开始画面相同，但标题使用红色。游戏世界不会在此期间继续滚动。
+    jsr restore_modal_font_glyphs
     lda #0
     sta VIC_SPRITE_ENABLE
     lda #SCREEN_A_D018
@@ -422,6 +600,7 @@ show_game_over_screen:
     bne @title
 
 draw_action_prompt:
+    ; 同一份十字符提示写入 A/B；这样从菜单返回前无论 D018 原值如何都一致。
     ldx #0
 @prompt:
     lda action_prompt, x
@@ -437,6 +616,8 @@ draw_action_prompt:
 ; 接受控制端口 1 上的 paddle 按钮 1/2 和摇杆 FIRE。按下前后都等待按钮
 ; 释放，可防止一次按键连续跳过两个画面。
 wait_for_action_button:
+    ; 依次等待“已释放 -> 按下 -> 再释放”，形成软件去抖和边沿触发。若只等
+    ; 按下，上一画面的同一次长按会立刻跳过下一画面。
 @wait_release:
     jsr wait_for_frame
     jsr action_button_pressed
@@ -452,6 +633,8 @@ wait_for_action_button:
     rts
 
 action_button_pressed:
+    ; 输出：C=1 有任一动作按钮按下，C=0 全部释放。按钮低电平有效，因此
+    ; PB2..PB4 全为 1 才表示没有按键。
     lda CIA1_PORT_B
     and #%00011100
     cmp #%00011100
@@ -463,6 +646,9 @@ action_button_pressed:
     rts
 
 clear_screens_and_colors:
+    ; X 从 0 自增到溢出，恰好遍历 256 个偏移；四个页面合计覆盖每个 1 KB
+    ; 屏幕区和 Color RAM。最后 24 个非可见字节也清零，包含 sprite 指针表，
+    ; 所以后续 initialize_player/dashboard 必须重新写指针。
     ldx #0
 @loop:
     lda #CHAR_BLANK
@@ -488,6 +674,9 @@ clear_screens_and_colors:
 ; 第 1/38 列组成青色外框，第 29 列分隔游戏区和八列状态栏。第 0/24 行
 ; 以及第 0/39 列保留黑色，形成参考图中的外侧留白。
 initialize_ui:
+    ; 输出：两张屏幕都有完全相同的青色框、分隔列、POTX 区和字符表盘。
+    ; 水平线适合绝对地址+X；垂直线适合三个行指针+固定 Y 列，这展示了两种
+    ; 常见的 6502 屏幕遍历方式。
     ; 先画上下两条水平框线。
     ldx #0
 @horizontal:
@@ -581,6 +770,7 @@ initialize_ui:
     rts
 
 advance_row_pointer:
+    ; 只推进 ROW_PTR，一般用于碰撞查询从屏幕基址走到指定字符行。
     clc
     lda ROW_PTR
     adc #SCREEN_COLUMNS
