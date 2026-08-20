@@ -1,0 +1,53 @@
+
+// 4 sprites generated with spritemate on 2026/8/20 06:21:30
+// Byte 64 of each sprite contains multicolor (high nibble) & color (low nibble) information
+
+LDA #$08 // sprite multicolor 1
+STA $D025
+LDA #$06 // sprite multicolor 2
+STA $D026
+
+
+// sprite 1 / singlecolor / color: $04
+elien_normal:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $18,$00,$01,$99,$80,$01,$FF,$80
+.BYTE $03,$FF,$C0,$03,$FF,$C0,$1F,$FF
+.BYTE $F8,$1F,$3C,$F8,$07,$3C,$E0,$07
+.BYTE $3C,$E0,$3F,$3C,$FC,$3F,$FF,$FC
+.BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04
+
+// sprite 2 / singlecolor / color: $04
+elien_fall:
+.BYTE $00,$00,$00,$00,$00,$00,$01,$99
+.BYTE $80,$01,$99,$80,$01,$FF,$80,$03
+.BYTE $FF,$C0,$03,$FF,$C0,$1F,$FF,$F8
+.BYTE $1F,$7E,$F8,$07,$BD,$E0,$07,$DB
+.BYTE $E0,$3F,$BD,$FC,$3F,$7E,$FC,$0F
+.BYTE $FF,$F0,$0F,$C3,$F0,$03,$81,$C0
+.BYTE $01,$E7,$80,$00,$E7,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$04
+
+// sprite 3 / singlecolor / color: $04
+elien_right:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $18,$00,$03,$19,$80,$03,$FF,$80
+.BYTE $03,$FF,$C0,$03,$FF,$C0,$3F,$FF
+.BYTE $F8,$3F,$9E,$78,$07,$9E,$60,$07
+.BYTE $9E,$60,$7F,$9E,$7C,$7F,$FF,$FC
+.BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04
+
+// sprite 4 / singlecolor / color: $04
+elien_left:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $18,$00,$01,$98,$C0,$01,$FF,$C0
+.BYTE $03,$FF,$C0,$03,$FF,$C0,$1F,$FF
+.BYTE $FC,$1E,$79,$FC,$06,$79,$E0,$06
+.BYTE $79,$E0,$3E,$79,$FE,$3F,$FF,$FE
+.BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04

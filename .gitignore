@@ -1,0 +1,9 @@
+# Assembler output and generated analysis files
+build/
+
+# Local Python cache
+__pycache__/
+*.py[cod]
+
+# Original reference audio is not distributed with the source repository
+Quarter_Slot.mp3
