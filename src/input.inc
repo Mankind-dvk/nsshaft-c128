@@ -6,12 +6,17 @@
 ; video.inc 中。
 ;
 ; 公共入口：initialize_paddles、read_paddle_x。
+;
+; 这里不做移动判断，只产生一个稳定的 potx_raw。这样玩家和 HUD 必然读取
+; 同一帧的值，不会因各自再次访问 SID 而得到不同结果。
 
 .segment "CODE"
 
 ; Paddle 输入 ---------------------------------------------------------------
 
 initialize_paddles:
+    ; 输出：CIA1 PA6/PA7 配置为端口选择输出，PB2..PB4 配置为按钮输入。
+    ; OR 用来只置位目标 bit，AND 用来只清除目标 bit，其他 CIA 引脚保持原值。
     ; PA6/PA7 选择连接到 SID POT 输入的控制端口。
     lda CIA1_DDR_A
     ora #%11000000
@@ -28,6 +33,8 @@ initialize_paddles:
     rts
 
 read_paddle_x:
+    ; 输出：potx_raw = SID_POTX 的 0..255 转换结果。
+    ; SID 的 POT ADC 不是瞬时完成的；切换控制端口后用短循环等待读数稳定。
 .ifdef FADE_PLATFORM_TEST
     ; 自动化效果测试保持 paddle 居中，让人物持续站在出生平台上。
     lda #128

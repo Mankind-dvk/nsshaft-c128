@@ -18,11 +18,19 @@
 ; 所有模块最终组成一个 ca65 翻译单元。这是常见的 6502 工程组织方式：
 ; 既保留低成本局部标签和精确的固定地址布局，又让各子系统源码保持精简、
 ; 易于审查。
+;
+; 本工程不定义跨例程自动保存寄存器的 ABI。除非例程注释另有说明，JSR
+; 调用者应假定 A、X、Y 和状态标志都会被修改；需要长期保存的数据一律放在
+; state.inc 的命名字节中。@name 是 ca65 的 cheap-local label，只在它前面
+; 最近的非 @ 标签范围内有效，因此不同例程可以重复使用 @done、@loop。
 
 .segment "LOADADDR"
+    ; PRG 文件开头的两个字节不是 8502 指令，而是 LOAD 使用的装载地址。
     .word $1c01
 
 .segment "BASIC"
+    ; BASIC 7 的链表行：下一行地址、行号 10、SYS token、十进制地址 7424、
+    ; 行尾 0，最后再用空指针结束程序。RUN 最终跳到机器码 $1d00。
     .word basic_end
     .word 10
     .byte $9e
@@ -34,6 +42,9 @@ basic_end:
 .segment "CODE"
 
 start:
+    ; 输入：由 BASIC 的 SYS 7424 进入；不依赖 A/X/Y 初值。
+    ; 输出：完成 C128/VIC-IIe/CIA 基础配置，然后进入标题或自动测试流程。
+    ; SEI 先阻止异步 IRQ 在内存映射尚未稳定时执行；音乐初始化完成后再 CLI。
     sei
 
     ; C128 原生 VIC-IIe 版本：可见显示期间让 8502 保持在 1 MHz。
@@ -56,6 +67,7 @@ start:
     ora #%00000011
     sta CIA2_PORT_A
 
+    ; 初始化期间先关闭全部 sprite，避免 BASIC 遗留寄存器显示随机图块。
     lda #0
     sta VIC_SPRITE_ENABLE
 
@@ -96,6 +108,8 @@ start:
     jmp new_game
 
 new_game:
+    ; 新游戏必须显式重置每个子系统。不能依赖“上一次 game over 后碰巧留下
+    ; 什么值”，否则第二局会继承消失平台计时器、滚动相位或音乐步骤。
     lda #0
     sta VIC_SPRITE_ENABLE
     sta active_screen
@@ -109,6 +123,8 @@ new_game:
 
     jsr clear_screens_and_colors
     jsr initialize_fade_platforms
+    jsr initialize_spring_platforms
+    jsr initialize_conveyor_platforms
     jsr seed_random
     jsr seed_platforms
     jsr initialize_ui
@@ -136,6 +152,8 @@ music_regression_loop:
 .endif
 
 main_loop:
+    ; 这一段是游戏的固定逐帧调度表。前八个 JSR 每帧执行一次；平台世界
+    ; 的一像素上移受 speed_counter 控制，当前配置为每三帧执行一次。
     jsr wait_for_frame
     jsr read_paddle_x
     jsr update_dashboard_pointer
@@ -143,6 +161,7 @@ main_loop:
     jsr update_player_horizontal
     jsr update_player_vertical
     jsr update_fade_platform
+    jsr update_spring_platform
     jsr update_player_sprite_frame
     lda game_over_flag
     beq @continue_game
@@ -158,12 +177,16 @@ main_loop:
     jmp main_loop
 
 game_over_screen:
+    ; 菜单画面会清屏并关闭 sprite；重新开始不是返回旧状态，而是完整调用
+    ; new_game 建立一局新的随机平台序列。
     jsr stop_music
     jsr show_game_over_screen
     jsr wait_for_action_button
     jmp new_game
 
 wait_for_frame:
+    ; 两段等待很重要：如果进入例程时光栅已经等于 250，先等待它离开，
+    ; 再等待下一次到达 250。否则主循环可能在同一帧内执行两次。
 @wait_until_away:
     lda VIC_RASTER
     cmp #FRAME_SYNC_RASTER
@@ -182,6 +205,8 @@ wait_for_frame:
 .include "hud.inc"
 .include "player.inc"
 .include "fade_platforms.inc"
+.include "spring_platforms.inc"
+.include "conveyor_platforms.inc"
 .include "music.inc"
 .include "assets.inc"
 .include "state.inc"
