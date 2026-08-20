@@ -23,6 +23,15 @@
 ; 调用者应假定 A、X、Y 和状态标志都会被修改；需要长期保存的数据一律放在
 ; state.inc 的命名字节中。@name 是 ca65 的 cheap-local label，只在它前面
 ; 最近的非 @ 标签范围内有效，因此不同例程可以重复使用 @done、@loop。
+;
+; English summary:
+;   This is the only assembler entry point. It owns machine initialization,
+;   round initialization, frame scheduling, and modal transitions. All included
+;   modules form one ca65 translation unit. There is no register-preserving ABI:
+;   unless a routine says otherwise, callers must treat A, X, Y, and flags as
+;   clobbered. Persistent values belong in state.inc.
+;   Frame order is input -> HUD -> horizontal physics -> vertical physics ->
+;   platform effects -> animation -> game-over check -> world scrolling.
 
 .segment "LOADADDR"
     ; PRG 文件开头的两个字节不是 8502 指令，而是 LOAD 使用的装载地址。
@@ -41,6 +50,7 @@ basic_end:
 
 .segment "CODE"
 
+; EN: One-time native-C128/MMU/VIC/CIA initialization; enters the title flow.
 start:
     ; 输入：由 BASIC 的 SYS 7424 进入；不依赖 A/X/Y 初值。
     ; 输出：完成 C128/VIC-IIe/CIA 基础配置，然后进入标题或自动测试流程。
@@ -107,6 +117,7 @@ start:
     jsr wait_for_action_button
     jmp new_game
 
+; EN: Reset every subsystem, generate a new world, and start music from bar one.
 new_game:
     ; 新游戏必须显式重置每个子系统。不能依赖“上一次 game over 后碰巧留下
     ; 什么值”，否则第二局会继承消失平台计时器、滚动相位或音乐步骤。
@@ -151,6 +162,7 @@ music_regression_loop:
     jmp music_regression_loop
 .endif
 
+; EN: Deterministic PAL-frame scheduler; game_over_flag is handled after updates.
 main_loop:
     ; 这一段是游戏的固定逐帧调度表。前八个 JSR 每帧执行一次；平台世界
     ; 的一像素上移受 speed_counter 控制，当前配置为每三帧执行一次。
@@ -176,6 +188,7 @@ main_loop:
     jsr scroll_one_pixel_up
     jmp main_loop
 
+; EN: Stop gameplay/music, show the modal screen, then rebuild a fresh round.
 game_over_screen:
     ; 菜单画面会清屏并关闭 sprite；重新开始不是返回旧状态，而是完整调用
     ; new_game 建立一局新的随机平台序列。
@@ -184,6 +197,7 @@ game_over_screen:
     jsr wait_for_action_button
     jmp new_game
 
+; EN: Wait until raster 250 is left and reached again, preventing double updates.
 wait_for_frame:
     ; 两段等待很重要：如果进入例程时光栅已经等于 250，先等待它离开，
     ; 再等待下一次到达 250。否则主循环可能在同一帧内执行两次。

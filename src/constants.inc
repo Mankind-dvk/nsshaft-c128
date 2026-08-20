@@ -3,6 +3,12 @@
 ; 本文件只保存地址和不可变的布局参数。将这些定义集中在一处，能够避免
 ; 显示、输入、UI 和游戏逻辑模块各自维护不一致的内存映射。
 ;
+; English summary:
+;   Compile-time addresses and immutable layout/tuning values live here. `$`
+;   introduces hexadecimal, `%` binary, `<`/`>` select address bytes, and these
+;   definitions consume no runtime RAM. Keep hardware registers named and keep
+;   playfield calculations inside the cyan frame and left of the HUD divider.
+;
 ; 初学者语法提示：
 ;   $1234       十六进制常量；%10101010 是二进制常量。
 ;   NAME = ...  汇编期常量，不会在运行时占用 RAM。
@@ -12,6 +18,7 @@
 ;
 ; 屏幕矩阵与双栏布局。青色框内的第 29 列是实心 UI 分隔条，因此平台
 ; 生成、软件滚动和碰撞采样都必须避开框线与状态栏。
+; EN: The playfield excludes the cyan frame and column-29 HUD divider.
 SCREEN_A                = $0400
 SCREEN_B                = $0c00
 COLOR_RAM               = $d800

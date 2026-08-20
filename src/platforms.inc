@@ -11,9 +11,17 @@
 ; 调用约定：randomize_platform 把结果写入 platform_start/width/type；
 ; draw_platform 从这些状态和 ROW_PTR 取输入。除 random_byte 在 A 中返回值外，
 ; 调用者不应依赖例程返回后的 A/X/Y。
+;
+; English summary:
+;   Generates width, legal X position, and one of six platform types from one
+;   seeded 16-bit LFSR. random_byte advances eight LFSR bits and returns a mixed
+;   byte in A; X is preserved for seed_platforms. randomize_platform writes the
+;   platform_* state bytes. draw_platform expects ROW_PTR to name the target row
+;   and writes both its screen codes and shared Color RAM.
 
 .segment "CODE"
 
+; EN: Draw five initial platforms into SCREEN_A; the lowest is forced safe.
 seed_platforms:
     ; 输入：SCREEN_A 已清空，random_state 已由 seed_random 初始化。
     ; 输出：在五个固定逻辑行画出初始平台；最后一行强制为安全出生平台。
@@ -48,6 +56,7 @@ seed_platforms:
 
 ; 使用机器启动后持续运行的时钟，以及已加载程序之外的 RAM 内容生成
 ; PRNG 种子。如果混合后的所有位恰好全部抵消，则使用非零后备种子。
+; EN: Mix clocks, timers, raster, and RAM into a nonzero 16-bit PRNG state.
 seed_random:
     ; 输出：random_state_low/high 得到非零的 16 位种子。
     ; EOR 混合多个会随开机/装载时刻变化的字节；它不是密码学随机数，只用于
@@ -82,6 +91,7 @@ seed_random:
     rts
 
 ; 16 位 Galois LFSR，多项式为 $b400；每次推进八位后，在 A 中返回混合字节。
+; EN: Advance the 16-bit Galois LFSR by eight bits; return high XOR low in A.
 random_byte:
     ; 旧实现每次调用只推进 1 bit，却把结果当作一个全新的随机字节使用。
     ; 相邻返回值因此共享七位，platform_type 再取低三位时会出现明显的方向
@@ -108,6 +118,7 @@ random_byte:
 
 ; 平台宽度为 7..12 个字符。平台始终位于青色外框与分隔条之间，绝不会
 ; 覆盖 UI 字符。
+; EN: Produce unbiased width, legal start column, and type in platform_* state.
 randomize_platform:
     ; 输出：
     ;   platform_width = 7..12 字符；
@@ -150,6 +161,7 @@ randomize_platform:
     sta platform_type
     rts
 
+; EN: Draw platform_* to ROW_PTR and set matching shared Color RAM cells.
 draw_platform:
     ; 输入：ROW_PTR 指向目标字符行，platform_start/width/type 已准备好。
     ; 输出：写目标屏幕缓冲区；同时写共享 Color RAM。弹簧使用紫色前景，

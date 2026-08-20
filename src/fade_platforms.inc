@@ -10,9 +10,16 @@
 ;
 ; 设计限制：同一时间只给一个已触发平台分配独立字形 60..62。第二个平台
 ; 被触发时，旧平台先删除；这样只用三个稀缺 ECM 字形槽就能实现闪烁效果。
+;
+; English summary:
+;   Tracks one activated disappearing platform. Landing converts its FULL/UPPER/
+;   LOWER cells in both buffers to private glyphs 60..62. A lifetime counter
+;   alternates red/gray ECM prefixes, then removes only those private glyphs and
+;   releases the player if that platform still supplies support.
 
 .segment "EFFECTS"
 
+; EN: Reset the single active fade lifecycle and player support marker.
 initialize_fade_platforms:
     ; 新游戏重置全部计时和支撑标志；未触发的灰色平台无需登记。
     lda #0
@@ -27,6 +34,7 @@ initialize_fade_platforms:
 
 ; collision_row 是平滑滚动中平台下部碎片所在的逻辑锚点行。平台完整时也
 ; 使用同一行，因此该值可以跨过后续像素相位；每次粗滚动再减一。
+; EN: Register collision_row, start timers, and convert both buffers to private glyphs.
 activate_fade_platform:
     ; 输入：collision_row 指向刚踩到的平台锚点。
     ; 输出：记录行、装载寿命/闪烁计时，并把两屏中的未触发灰色码转换成
@@ -53,6 +61,7 @@ activate_fade_platform:
     jmp apply_fade_effect_to_buffers
 
 ; 每帧推进倒计时。激活时立即变红，随后每隔固定帧数在红/灰之间切换。
+; EN: Tick lifetime/flashing; recolor or remove the active platform when due.
 update_fade_platform:
     ; 每帧调用。寿命到 0 删除平台；flash_counter 到 0 时仅切换屏幕码的
     ; ECM 高两位，字形低六位保持 60..62，因此形状和滚动相位不变。
@@ -78,6 +87,7 @@ update_fade_platform:
 
 ; 粗滚动把完整平台移到上一字符行，因此效果扫描的锚点也必须同步上移。
 ; 平台从第 2 行离开游戏区时，转场代码已经清除了它，不再继续倒计时。
+; EN: Move the saved anchor up after each completed eight-pixel coarse scroll.
 advance_fade_platform_scroll_position:
     ; 每完成一次八像素粗滚动调用。屏幕内容已上移一行，所以保存的逻辑
     ; 锚点也必须减一，否则后续闪烁会修改错误的平台。
@@ -96,6 +106,7 @@ advance_fade_platform_scroll_position:
 @done:
     rts
 
+; EN: Delete private fade glyphs from both buffers and release supported player.
 remove_active_fade_platform:
     ; 把两个缓冲区中属于当前激活平台的三种字形全部变为空白，并在玩家仍
     ; 受它支撑时解除支撑，使下一帧进入重力下落。
@@ -115,6 +126,7 @@ remove_active_fade_platform:
 
 ; 只有人物当前仍由正在消失的平台支撑时，删除平台才会主动开始下落。
 ; 若人物已经走开并落到普通平台，旧平台的倒计时不会干扰新的支撑状态。
+; EN: Clear support only when the player still stands on the disappearing platform.
 release_player_from_fade_platform:
     lda player_on_fade_platform
     beq @done
@@ -128,6 +140,7 @@ release_player_from_fade_platform:
 
 ; 两个缓冲区可能分别保留完整平台和上下碎片，所以围绕锚点扫描三行。
 ; 平台间距至少四行，三行窗口不会碰到另一个未触发的消失平台。
+; EN: Scan three rows around the anchor and transform matching cells in both buffers.
 apply_fade_effect_to_buffers:
     ; 输入：fade_platform_row、fade_effect_mode、fade_color_prefix。
     ; 输出：同时修改 SCREEN_A/B。扫描 row-1,row,row+1 是因为转场期间一个
@@ -175,6 +188,7 @@ apply_fade_effect_to_buffers:
 
 ; 输入和输出均为 A 中的屏幕码。激活只转换未触发灰色平台；重新着色和
 ; 删除只认低六位为 60..62 的已触发平台字形。
+; EN: Pure A-in/A-out mapping for activate, recolor, or remove mode.
 transform_fade_character:
     ; 输入：A=一个屏幕码。输出：A=转换后的屏幕码。
     ; 这是纯“单字符映射”例程；外层负责地址和循环，因此激活、重着色、删除

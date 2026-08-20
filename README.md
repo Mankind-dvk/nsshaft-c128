@@ -130,6 +130,11 @@ to build or run the PRG.
 See `ARCHITECTURE.md` for the call flow, memory map, sprite allocation, and
 cross-module invariants.
 
+English-speaking contributors should start with `BEGINNER_GUIDE.en.md`. Every
+source module also includes an English responsibility summary and English
+routine contracts alongside the detailed Chinese comments, so both language
+groups work from the same buildable source tree.
+
 如果团队中有第一次接触 6502/8502 汇编的成员，建议先阅读
 `BEGINNER_GUIDE.zh-CN.md`。该文档按实际运行顺序说明 BASIC 启动桩、主循环、
 双缓冲、平滑滚动、平台碰撞、paddle 输入、sprite 和 SID 中断音乐；源码内也已
