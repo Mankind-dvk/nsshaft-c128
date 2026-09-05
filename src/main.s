@@ -31,7 +31,7 @@
 ;   unless a routine says otherwise, callers must treat A, X, Y, and flags as
 ;   clobbered. Persistent values belong in state.inc.
 ;   Frame order is input -> HUD -> horizontal physics -> vertical physics ->
-;   platform effects -> animation -> game-over check -> world scrolling.
+;   platform effects -> animation -> game-over check -> scheduled world scroll.
 
 .segment "LOADADDR"
     ; PRG 文件开头的两个字节不是 8502 指令，而是 LOAD 使用的装载地址。
@@ -113,8 +113,9 @@ start:
     ; 自动化回归版本绕过标题按钮，只用于 VICE 的限时启动和 SID 写入检查。
     jmp new_game
 .endif
+start_screen:
     jsr show_start_screen
-    jsr wait_for_action_button
+    jsr run_character_selection
     jmp new_game
 
 ; EN: Reset every subsystem, generate a new world, and start music from bar one.
@@ -137,14 +138,14 @@ new_game:
     jsr initialize_spring_platforms
     jsr initialize_conveyor_platforms
     jsr seed_random
+    jsr initialize_score
+    jsr initialize_health
+    jsr initialize_platform_generation
     jsr seed_platforms
     jsr initialize_ui
     jsr initialize_hud
     jsr read_paddle_x
     jsr update_potx_display
-
-    lda #SCROLL_DELAY
-    sta speed_counter
     lda #2
     sta rows_until_platform
 
@@ -165,7 +166,7 @@ music_regression_loop:
 ; EN: Deterministic PAL-frame scheduler; game_over_flag is handled after updates.
 main_loop:
     ; 这一段是游戏的固定逐帧调度表。前八个 JSR 每帧执行一次；平台世界
-    ; 的一像素上移受 speed_counter 控制，当前配置为每三帧执行一次。
+    ; 的一像素上移由定点相位累加器控制；首次落到新平台时才增加分数。
     jsr wait_for_frame
     jsr read_paddle_x
     jsr update_dashboard_pointer
@@ -180,22 +181,18 @@ main_loop:
     jmp game_over_screen
 @continue_game:
 
-    dec speed_counter
-    bne main_loop
-    lda #SCROLL_DELAY
-    sta speed_counter
-
+    jsr scroll_step_ready
+    bcc main_loop
     jsr scroll_one_pixel_up
     jmp main_loop
 
 ; EN: Stop gameplay/music, show the modal screen, then rebuild a fresh round.
 game_over_screen:
-    ; 菜单画面会清屏并关闭 sprite；重新开始不是返回旧状态，而是完整调用
-    ; new_game 建立一局新的随机平台序列。
+    ; 结束画面确认后回到选人界面；下一局仍由 new_game 完整重建随机世界。
     jsr stop_music
     jsr show_game_over_screen
     jsr wait_for_action_button
-    jmp new_game
+    jmp start_screen
 
 ; EN: Wait until raster 250 is left and reached again, preventing double updates.
 wait_for_frame:
@@ -217,6 +214,9 @@ wait_for_frame:
 .include "platforms.inc"
 .include "input.inc"
 .include "hud.inc"
+.include "score.inc"
+.include "health.inc"
+.include "character_select.inc"
 .include "player.inc"
 .include "fade_platforms.inc"
 .include "spring_platforms.inc"

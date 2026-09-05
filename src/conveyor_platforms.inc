@@ -8,7 +8,7 @@
 ; “绿色底、黑色镂空箭头”，传送平台改用普通黑色背景和绿色 Color RAM：
 ; 字形位 1 显示绿色，位 0 露出黑色背景。
 ;
-; 64 字符 ECM 字符集没有六个空闲槽。本模块在游戏画面期间复用 N、S、-、H
+; 64 字符 ECM 字符集没有六个空闲槽。本模块在游戏画面期间复用 N、S、-、V
 ; 四个标题字形槽：每个方向只需要 FULL/LOWER 共用槽和 UPPER 槽。粗滚动
 ; 完成后把共用槽恢复成完整箭头；回到菜单前再恢复四个原始文字字形。
 ;
@@ -19,14 +19,14 @@
 ; English summary:
 ;   Builds green left/right cut-out arrow glyphs and their smooth-scroll
 ;   fragments. Each FULL slot doubles as LOWER. Gameplay temporarily reuses the
-;   N/S/-/H font slots; modal entry restores those four glyphs from the immutable
+;   N/S/-/V font slots; modal entry restores those four glyphs from the immutable
 ;   table below. Player movement itself is implemented in player.inc.
 
 .segment "GAMEPLAY"
 
 ; EN: Install full arrow glyphs and clear both UPPER runtime slots for gameplay.
 initialize_conveyor_platforms:
-    ; 新游戏已经清空两张屏幕，所以此时覆盖 N/S/-/H 不会破坏可见文字。
+    ; 新游戏已经清空两张屏幕，所以此时覆盖 N/S/-/V 不会破坏可见文字。
     ; 完整平台使用 LEFT/RIGHT_FULL；两个 UPPER 槽等第一次滚动时再生成。
     jsr restore_conveyor_full_glyphs
     ldy #7
@@ -95,17 +95,23 @@ restore_conveyor_full_glyphs:
     bpl @copy
     rts
 
-; EN: Restore original N/S/-/H bytes before drawing title or game-over text.
+; EN: Restore original N/S/-/V bytes before drawing title or game-over text.
 restore_modal_font_glyphs:
-    ; 开始/结束画面会再次使用 N、S、-、H。四个槽连续排列，因此用一个
-    ; 0..31 循环恢复，不必写四套八字节复制代码。
+    ; N/S/- 连续占据 19..21；V 位于 30。H 从未覆盖，游戏中可稳定显示 HP。
     ldx #0
-@copy:
-    lda modal_font_19_22, x
+@copy_19_21:
+    lda modal_font_19_21, x
     sta conveyor_left_full_glyph, x
     inx
-    cpx #32
-    bne @copy
+    cpx #24
+    bne @copy_19_21
+
+    ldy #7
+@copy_v:
+    lda modal_font_v, y
+    sta conveyor_right_upper_glyph, y
+    dey
+    bpl @copy_v
     rts
 
 ; 黑色“<”和“>”是在全绿字符中把对应位清零形成的。模板放在 GAMEPLAY
@@ -115,11 +121,12 @@ conveyor_left_source_glyph:
 conveyor_right_source_glyph:
     .byte $9f,$cf,$e7,$f3,$e7,$cf,$9f,$ff
 
-; 字符 19..22 原始的 N、S、连字符、H。进入模态画面前从这里恢复。
-modal_font_19_22:
+; 字符 19..21 与 30 原始的 N、S、连字符、V。进入模态画面前恢复。
+modal_font_19_21:
     .byte $66,$76,$7e,$7e,$6e,$66,$66,$00
     .byte $3c,$66,$60,$3c,$06,$66,$3c,$00
     .byte $00,$00,$00,$7e,$00,$00,$00,$00
-    .byte $66,$66,$66,$7e,$66,$66,$66,$00
+modal_font_v:
+    .byte $66,$66,$66,$66,$66,$3c,$18,$00
 
 .assert * <= $3800, error, "conveyor-platform code exceeds reserved gameplay memory"

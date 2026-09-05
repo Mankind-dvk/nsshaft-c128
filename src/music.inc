@@ -7,8 +7,9 @@
 ; 调性和段落重新构造的硬件 SID 编曲。
 ;
 ; 播放器位于 $2a00，处在字符集末尾与 sprite 数据之间。VIC-IIe 在主循环
-; 帧同步线之前每个 PAL 帧调用一次 play_music_frame；22/256 的相位增量
-; 得到约 128.9 BPM。IRQ 不使用零页，只改音乐状态并完整保存 A/X/Y，
+; 帧同步线之前每个 PAL 帧调用一次 play_music_frame。基础档 44/512 与旧版
+; 22/256 相同，约为 129 BPM；20/40/60/80 分时和滚动一起提升到
+; 1.25/1.5/1.75/2 倍。IRQ 不使用零页，只改音乐状态并完整保存 A/X/Y，
 ; 因此不会干扰正在运行的平台滚动和碰撞代码。
 ;
 ; 公共入口：initialize_music、play_music_frame、stop_music。
@@ -20,9 +21,11 @@
 ; English summary:
 ;   A three-voice SID arrangement reconstructed from Quarter Slot: pulse lead,
 ;   triangle bass, and shared saw/noise arpeggio-percussion voice. Raster IRQ 240
-;   advances playback independently of the main loop. The handler preserves
-;   A/X/Y, avoids shared zero-page pointers, acknowledges VIC, and returns through
-;   the C128 KERNAL restore path. Pattern entries are frequency-table indices.
+;   advances playback independently of the main loop. A score-controlled modulo-
+;   512 phase accumulator matches the five world-scroll multipliers exactly. The
+;   handler preserves A/X/Y, avoids shared zero-page pointers, acknowledges VIC,
+;   and returns through the C128 KERNAL restore path. Pattern entries are
+;   frequency-table indices.
 
 .segment "MUSIC"
 
@@ -33,7 +36,8 @@ initialize_music:
     sei
     lda #0
     sta music_step
-    sta music_tempo_accumulator
+    sta music_tempo_accumulator_low
+    sta music_tempo_accumulator_high
     sta music_gate_timer
     sta music_voice3_delay
     sta SID_FILTER_CUTOFF_LOW
@@ -102,12 +106,12 @@ music_raster_irq:
     jsr play_music_frame
     jmp KERNAL_IRQ_RETURN
 
-; 每帧先处理包络和声道 3 的鼓声延时，再用 8 位相位累加器推进八分音符。
-; EN: Accumulate PAL-frame tempo and trigger the next 128-step event on overflow.
+; 每帧先处理包络和声道 3 的鼓声延时，再用模 512 相位累加器推进八分音符。
+; EN: Accumulate modulo-512 PAL tempo and trigger the next pattern event on wrap.
 play_music_frame:
     ; 输入：无。输出：可能关闭上一音符 GATE、恢复琶音、推进 music_step。
-    ; 8 位 tempo accumulator 的 ADC 溢出通过 C=1 表示；只有溢出帧才触发
-    ; 下一步，因此无需昂贵的 16 位除法或逐帧倒计时换算 BPM。
+    ; 低字节 ADC 的进位加到 high；high 达到 2 就减 2 并触发下一步。该 9 位
+    ; 相位既保留原始 BPM，又能精确表示 1.25 和 1.75 两个倍率。
     lda music_voice3_delay
     beq @update_gate
     dec music_voice3_delay
@@ -128,10 +132,15 @@ play_music_frame:
 
 @update_tempo:
     clc
-    lda music_tempo_accumulator
-    adc #MUSIC_TEMPO_INCREMENT
-    sta music_tempo_accumulator
-    bcc @done
+    lda music_tempo_accumulator_low
+    adc music_tempo_increment
+    sta music_tempo_accumulator_low
+    lda music_tempo_accumulator_high
+    adc #0
+    cmp #MUSIC_TEMPO_WRAP_HIGH
+    bcc @store_tempo_high
+    sbc #MUSIC_TEMPO_WRAP_HIGH
+    sta music_tempo_accumulator_high
 
     inc music_step
     lda music_step
@@ -139,6 +148,10 @@ play_music_frame:
     sta music_step
     jsr music_trigger_current_step
 @done:
+    rts
+
+@store_tempo_high:
+    sta music_tempo_accumulator_high
     rts
 
 ; EN: Disable the raster source, restore the default IRQ vector, and silence SID.

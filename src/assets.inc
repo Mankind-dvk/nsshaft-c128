@@ -1,7 +1,8 @@
 ; ---------------------------------------------------------------------------
 ; 图形资源与不可变游戏数据
 ; ---------------------------------------------------------------------------
-; c128-prg.cfg 将 CHARSET 固定在 $2800，将 SPRITE 固定在 $3000。
+; c128-prg.cfg 将 CHARSET 固定在 $2800，将 Elien 四帧与表针固定在 $3000，
+; 并将 Elien hurt、Ember/Wasser 全套帧固定在 $3a00-$3cbf。
 ; 运行时代码只允许改写下文标明的过渡字形、POT 数字和 paddle 指针 sprite
 ; 缓冲区；其余字节均为不可变模板。
 ;
@@ -10,10 +11,12 @@
 ; 24x21 像素，每行 3 字节，共 63 字节，再补 1 字节对齐到 64。
 ;
 ; English summary:
-;   The linker fixes CHARSET at $2800 and SPRITE at $3000. A character is eight
-;   bytes, bit 7 at the left; a monochrome sprite is 24x21 pixels (63 bytes) plus
-;   one alignment byte. Labels marked as runtime glyphs or writable dial storage
-;   may change; all other bytes are immutable templates and lookup tables.
+;   The linker fixes CHARSET at $2800, the main SPRITE bank at $3000, and the
+;   remaining character frames at $3a00-$3cbf. A character is eight bytes with
+;   bit 7 at the left. A monochrome sprite is 24x21 pixels (63 bytes) plus one
+;   alignment byte. Labels
+;   marked as runtime glyphs or writable dial storage may change; all other bytes
+;   are immutable templates and lookup tables.
 
 .segment "CHARSET"
 
@@ -80,19 +83,17 @@ digit_font:
     .byte $66,$66,$3c,$18,$3c,$66,$66,$00
     .byte $00,$18,$18,$00,$00,$18,$18,$00
 
-; 19..22：N、S、连字符、H。标题/结束画面使用这些原始字形；进入游戏后，
-; conveyor_platforms.inc 会把四个连续槽临时改成左/右传送平台的完整/上部
-; 字形。使用标签标出准确地址，避免运行时代码依赖手算 $2800+编号*8。
+; 19..22：N、S、连字符、H。游戏中传送平台只复用前三个槽；H 保留给 HP HUD。
 conveyor_left_full_glyph:
     .byte $66,$76,$7e,$7e,$6e,$66,$66,$00
 conveyor_left_upper_glyph:
     .byte $3c,$66,$60,$3c,$06,$66,$3c,$00
 conveyor_right_full_glyph:
     .byte $00,$00,$00,$7e,$00,$00,$00,$00
-conveyor_right_upper_glyph:
     .byte $66,$66,$66,$7e,$66,$66,$66,$00
 
-; 23..30：A、F、R、E、I、G、M、V。
+; 23..30：A、F、R、E、I、G、M、V。V 槽在游戏中临时作为向右传送平台的
+; UPPER 字形；进入标题/结束画面前再恢复原始 V。
     .byte $18,$3c,$66,$66,$7e,$66,$66,$00
     .byte $7e,$60,$60,$7c,$60,$60,$60,$00
     .byte $7c,$66,$66,$7c,$6c,$66,$66,$00
@@ -100,6 +101,7 @@ conveyor_right_upper_glyph:
     .byte $7e,$18,$18,$18,$18,$18,$7e,$00
     .byte $3c,$66,$60,$6e,$66,$66,$3e,$00
     .byte $63,$77,$7f,$6b,$63,$63,$63,$00
+conveyor_right_upper_glyph:
     .byte $66,$66,$66,$66,$66,$3c,$18,$00
 
 ; 31..34：运行时生成的上/下碎片，用于逐像素滚动。
@@ -231,6 +233,140 @@ paddle_pointer_sprite:
     .res 63, 0
     .byte 0
 
+.segment "PLAYERSETS"
+
+; Spritemate 的 elien_hurt 单色帧。导出数据第 64 字节是颜色元数据 $07，
+; 不是位图；这里与其他玩家帧一样改成 0 作为对齐填充。它仍由硬件 sprite 0
+; 显示，不会额外占用 sprite 1..3。
+player_hurt_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $18,$00,$01,$99,$80,$01,$ff,$80
+    .byte $03,$ff,$c0,$03,$ff,$c0,$1f,$ff
+    .byte $f8,$1f,$3c,$f8,$07,$3c,$e0,$07
+    .byte $3c,$e0,$3f,$3c,$fc,$3f,$e6,$fc
+    .byte $0f,$da,$f0,$0f,$ff,$f0,$03,$81
+    .byte $c0,$03,$81,$c0,$03,$81,$c0,$00
+player_hurt_sprite_end:
+
+.assert player_hurt_sprite = PLAYER_HURT_ADDRESS, error, "hurt sprite address changed"
+.assert player_hurt_sprite_end-player_hurt_sprite = 64, error, "hurt sprite must occupy one block"
+
+; Ember 与 Wasser 的 normal/fall/right/left/hurt。Spritemate 工程中的
+; `emeber_right` 只有名字拼写错误，位图在这里按正确的 ember_right 标签导入。
+ember_normal_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$18
+    .byte $00,$00,$18,$00,$00,$3c,$00,$02
+    .byte $7e,$40,$06,$7e,$60,$06,$ff,$60
+    .byte $0e,$ff,$70,$0f,$ff,$f0,$1f,$ff
+    .byte $f8,$1f,$ff,$f8,$1f,$3c,$f8,$1f
+    .byte $3c,$f8,$1f,$3c,$f8,$0f,$3c,$f0
+    .byte $0f,$ff,$f0,$07,$ff,$e0,$03,$ff
+    .byte $c0,$01,$c3,$80,$01,$c3,$80,$00
+
+ember_fall_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$18
+    .byte $00,$00,$18,$00,$00,$3c,$00,$02
+    .byte $7e,$40,$06,$7e,$60,$06,$ff,$60
+    .byte $0e,$ff,$70,$0f,$ff,$f0,$1f,$ff
+    .byte $f8,$1f,$ff,$f8,$1f,$ff,$f8,$1f
+    .byte $ff,$f8,$1f,$ff,$f8,$0e,$18,$70
+    .byte $0f,$3c,$f0,$07,$3c,$e0,$03,$ff
+    .byte $c0,$00,$ff,$00,$00,$3c,$00,$00
+
+ember_right_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$c0
+    .byte $00,$00,$78,$00,$30,$7c,$00,$1c
+    .byte $3e,$00,$1e,$3e,$c0,$0e,$ff,$60
+    .byte $0f,$ff,$70,$0f,$ff,$70,$1f,$ff
+    .byte $f8,$1f,$ff,$f8,$1f,$9e,$78,$1f
+    .byte $9e,$78,$1f,$9e,$78,$0f,$9e,$70
+    .byte $0f,$ff,$f0,$07,$ff,$e0,$03,$ff
+    .byte $c0,$01,$c3,$80,$01,$c3,$80,$00
+
+ember_left_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$03
+    .byte $00,$00,$1e,$00,$00,$3e,$0c,$00
+    .byte $7c,$38,$03,$7c,$78,$06,$ff,$70
+    .byte $0e,$ff,$f0,$0e,$ff,$f0,$1f,$ff
+    .byte $f8,$1f,$ff,$f8,$1e,$79,$f8,$1e
+    .byte $79,$f8,$1e,$79,$f8,$0e,$79,$f0
+    .byte $0f,$ff,$f0,$07,$ff,$e0,$03,$ff
+    .byte $c0,$01,$c3,$80,$01,$c3,$80,$00
+
+ember_hurt_sprite:
+    .byte $00,$00,$00,$00,$18,$00,$0e,$18
+    .byte $70,$3c,$bd,$3c,$1c,$ff,$38,$1e
+    .byte $ff,$70,$0e,$ff,$72,$2e,$ff,$72
+    .byte $1d,$ff,$f8,$1a,$ff,$f8,$5d,$ff
+    .byte $fa,$7e,$db,$7e,$3e,$18,$7c,$1f
+    .byte $3c,$f8,$1f,$3c,$f8,$0f,$ff,$f0
+    .byte $0f,$e7,$f0,$07,$db,$e0,$03,$ff
+    .byte $c0,$01,$c3,$80,$01,$c3,$80,$00
+
+wasser_normal_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$3c,$00,$00,$f3,$00,$03,$fd
+    .byte $c0,$07,$fe,$e0,$0f,$ff,$70,$0f
+    .byte $ff,$b0,$1f,$3c,$b8,$1f,$3c,$b8
+    .byte $1f,$3c,$b8,$1f,$3c,$f8,$0f,$ff
+    .byte $f0,$07,$ff,$e0,$03,$ff,$c0,$00
+
+wasser_fall_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$3c,$00,$00
+    .byte $fb,$00,$03,$fd,$c0,$07,$fe,$e0
+    .byte $0e,$7e,$70,$0e,$7e,$70,$1e,$7e
+    .byte $78,$1e,$7e,$38,$1f,$ff,$b8,$1f
+    .byte $ff,$b8,$1f,$ff,$78,$0f,$e7,$70
+    .byte $0f,$e6,$f0,$07,$fe,$e0,$03,$fd
+    .byte $c0,$00,$fb,$00,$00,$3c,$00,$00
+
+wasser_right_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$3c,$00,$00,$f3,$00,$03,$fd
+    .byte $c0,$07,$fe,$e0,$0f,$ff,$70,$0f
+    .byte $ff,$70,$1f,$9e,$78,$1f,$9e,$78
+    .byte $1f,$9e,$78,$1f,$9e,$78,$0f,$ff
+    .byte $f0,$07,$ff,$e0,$03,$ff,$c0,$00
+
+wasser_left_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$3c,$00,$00,$f3,$00,$03,$fd
+    .byte $c0,$07,$fe,$e0,$0f,$ff,$70,$0f
+    .byte $ff,$b0,$1e,$79,$b8,$1e,$79,$b8
+    .byte $1e,$79,$b8,$1e,$79,$f8,$0f,$ff
+    .byte $f0,$07,$ff,$e0,$03,$ff,$c0,$00
+
+wasser_hurt_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$06
+    .byte $00,$10,$04,$01,$90,$0d,$c7,$80
+    .byte $08,$fe,$20,$00,$f3,$00,$03,$fd
+    .byte $c0,$07,$fe,$e0,$0f,$ff,$70,$0f
+    .byte $ff,$b0,$1d,$fb,$b8,$1e,$f7,$b8
+    .byte $5f,$6f,$ba,$9e,$f7,$f8,$0d,$fb
+    .byte $f2,$67,$ff,$e4,$7f,$ff,$fc,$00
+
+player_sets_end:
+.assert ember_normal_sprite = EMBER_NORMAL_ADDRESS, error, "Ember normal address changed"
+.assert ember_fall_sprite = EMBER_FALL_ADDRESS, error, "Ember fall address changed"
+.assert ember_right_sprite = EMBER_RIGHT_ADDRESS, error, "Ember right address changed"
+.assert ember_left_sprite = EMBER_LEFT_ADDRESS, error, "Ember left address changed"
+.assert ember_hurt_sprite = EMBER_HURT_ADDRESS, error, "Ember hurt address changed"
+.assert wasser_normal_sprite = WASSER_NORMAL_ADDRESS, error, "Wasser normal address changed"
+.assert wasser_fall_sprite = WASSER_FALL_ADDRESS, error, "Wasser fall address changed"
+.assert wasser_right_sprite = WASSER_RIGHT_ADDRESS, error, "Wasser right address changed"
+.assert wasser_left_sprite = WASSER_LEFT_ADDRESS, error, "Wasser left address changed"
+.assert wasser_hurt_sprite = WASSER_HURT_ADDRESS, error, "Wasser hurt address changed"
+.assert player_sets_end = PLAYER_SETS_END_ADDRESS, error, "player sets must end before select code"
+
 .segment "CODE"
 
 potx_label:
@@ -304,6 +440,10 @@ seed_platform_address_high:
     .byte >(SCREEN_A + 12*SCREEN_COLUMNS)
     .byte >(SCREEN_A + 17*SCREEN_COLUMNS)
     .byte >(SCREEN_A + 22*SCREEN_COLUMNS)
+
+; 初始平台所在屏幕行 2/7/12/17/22，换算成游戏区相对索引 0/5/10/15/20。
+seed_platform_score_index:
+    .byte 0, 5, 10, 15, 20
 
 platform_chars:
     .byte CHAR_PLATFORM_FULL, CHAR_SPIKE_TRIANGLE, CHAR_FADE_FULL

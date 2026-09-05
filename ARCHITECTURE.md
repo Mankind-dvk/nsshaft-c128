@@ -22,6 +22,9 @@ the same generated machine code while making ownership and call flow explicit.
 | `src/platforms.inc` | PRNG seeding, platform type/width/position generation, platform drawing |
 | `src/input.inc` | Paddle port setup and POTX sampling |
 | `src/hud.inc` | Character POTX display and dial hand |
+| `src/score.inc` | First-landing platform score, row claim flags and difficulty scheduling |
+| `src/health.inc` | Every-third-point HP reward, HUD rendering, spike/top damage recovery |
+| `src/character_select.inc` | Three-character title selection, paddle-neutral prompt/error feedback, frame/color lookup tables |
 | `src/player.inc` | Player sprite, horizontal control, gravity, landing and spike collision |
 | `src/fade_platforms.inc` | Disappearing-platform activation, flashing, scrolling anchor and deletion |
 | `src/spring_platforms.inc` | Spring glyph transitions, compression lifecycle and upward launch |
@@ -39,14 +42,19 @@ the same generated machine code while making ownership and call flow explicit.
 3. select VIC bank 0 and configure extended-color character mode;
 4. initialize paddle input;
 5. silence any SID state left by the previous program;
-6. display the title screen and wait for an action button.
+6. display the title screen and preview Elien, Ember, and Wasser;
+7. use POTX thirds to highlight a character and lock it with Fire;
+8. show the locked character facing left/right until POTX reaches the gameplay
+   neutral range under `PRESS FIRE WHEN CHARACTER FACES YOU`;
+9. accept a second Fire only from the forward-facing frame; off-center Fire
+   shows the selected hurt frame for at least 12 PAL frames.
 
 `new_game` resets subsystem state in dependency order:
 
 1. clear both screen buffers;
 2. reset disappearing- and spring-platform state, then install conveyor glyphs;
-3. seed and generate platforms;
-4. draw the fixed UI;
+3. seed the PRNG, reset score/HP/claim state, and generate platforms;
+4. draw the fixed UI, six-digit score and three-digit HP;
 5. initialize POTX display;
 6. create the player and dial hand;
 7. initialize the SID arrangement and install the raster IRQ;
@@ -60,8 +68,15 @@ the same generated machine code while making ownership and call flow explicit.
 4. update horizontal player movement;
 5. update gravity, upward spring motion and platform collision;
 6. update activated disappearing and compressed spring platforms;
-7. select the player animation frame and process game over;
-8. advance platform scrolling at the configured cadence.
+7. award a point if an airborne landing reached any unclaimed platform,
+   including a spike, and award one HP on every third point;
+8. on scores 20/40/60/80, apply the same 1.25x/1.5x/1.75x/2x level to world
+   scrolling and the SID event sequencer;
+9. consume HP and detach/bounce on spike or top-frame damage, while bottom exit
+   requests game over immediately;
+10. select the player animation frame and process game over;
+11. add the current difficulty rate to the scroll phase accumulator;
+12. on accumulator carry, advance the world one pixel.
 
 The music does not depend on completion of `main_loop`. VIC-IIe raster line 240
 dispatches `music_raster_irq`, while the main loop synchronizes at line 250.
@@ -79,16 +94,19 @@ than one display frame.
 | Range | Use |
 | --- | --- |
 | `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
-| `$1d00-$269a` | Main loop, video, platform generation, HUD, tables and mutable state |
+| `$1d00-$27e4` | Main loop, video, platform drawing, HUD, scoring, tables and mutable state |
 | `$2800-$29ff` | 64-character custom character set |
-| `$2a00-$2dae` | SID player, frequency tables and 16-bar arrangement |
+| `$2a00-$2dc2` | SID player, frequency tables and 16-bar arrangement |
 | `$2e00-$2f37` | Disappearing-platform effect routines |
 | `$3000-$303f` | Player normal frame |
 | `$3040-$307f` | Player falling frame |
 | `$3080-$30bf` | Player facing/moving right frame |
 | `$30c0-$30ff` | Player facing/moving left frame |
 | `$3100-$313f` | Writable dial-hand block |
-| `$3140-$37a7` | Player physics, spring-platform and conveyor-platform routines |
+| `$3140-$37d4` | Player physics, spring-platform and conveyor-platform routines |
+| `$3800-$39ed` | Weighted platform generation, HP display and hazard recovery routines |
+| `$3a00-$3cbf` | Elien hurt plus all five Ember and five Wasser frames |
+| `$3cc0-$3e8f` | Character-selection code, prompt glyphs and frame/color lookup tables |
 | `$0400-$07ff` | Screen buffer A and its sprite pointers |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointers |
 | `$d800-$dbff` | Shared VIC color RAM |
@@ -101,21 +119,50 @@ space.
 
 | Sprite | Use |
 | --- | --- |
-| 0 | Player |
-| 1-3 | Free |
+| 0 | Selected player; left preview on the title selector |
+| 1 | Middle preview during title selection; otherwise free |
+| 2 | Right preview during title selection; otherwise free |
+| 3 | Free |
 | 4 | Red paddle/dial hand |
 | 5-7 | Free |
 
-The four player animation blocks are memory frames selected by hardware sprite
-0's pointer. They do not allocate hardware sprites 1-3.
+Each of the three characters has normal/fall/right/left/hurt bitmap blocks.
+Elien's movement frames occupy `$3000-$30ff`; the other eleven blocks occupy
+`$3a00-$3cbf`. Gameplay selects one of these fifteen memory blocks through
+hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
 
 ## Important invariants
 
 - Both screen buffers must contain the same sprite pointer values.
+- `selected_character` is changed only by the title selector and intentionally
+  survives `new_game`. Every gameplay and game-over frame lookup uses it.
+- Character-selection POTX thirds are 0..84, 85..170, and 171..255. The second
+  Fire is accepted only in the gameplay-neutral 108..148 range, after a full
+  press/release debounce. Off-center Fire selects the character's hurt block
+  for at least 12 frames, then requires another press.
 - `active_screen` must match the screen selected in `$d018`.
 - Pixel-transition passes write every playfield cell directly to the hidden
   buffer; fixed UI cells are already mirrored and are not recopied per step.
 - The status panel is never included in platform transitions or collision scans.
+- Score digits are written to both screen buffers. A parallel 21-byte row table
+  moves with each coarse scroll and marks platforms claimed on first landing.
+  Spike contact claims and scores the row before damage handling, so surviving
+  or dying on the same spike cannot award it again.
+  Scores 20/40/60/80 select 1.25x/1.5x/1.75x/2x speed. Rates through 224 use
+  the phase accumulator; rate zero is the exact 256/256 every-frame sentinel.
+- The same score-level index selects SID tempo increments 44/55/66/77/88. The
+  music accumulator wraps at 512, so these are exact 1x/1.25x/1.5x/1.75x/2x
+  ratios rather than rounded byte increments. Pitch tables never change.
+- Platform-generation levels change at scores 5/10/20/40. Their weighted pools
+  reduce normal-platform probability from 75% to 12.5% while unlocking fade,
+  conveyors, and spikes. Normal may repeat freely; every other type is rejected
+  when it would be the third identical result in succession.
+- `HP:000` is mirrored to both buffers. Every third awarded platform increments
+  HP without changing score. Spikes bounce and top contact detaches the player
+  after consuming HP; bottom exit bypasses HP and remains immediately fatal.
+- Absorbed damage reloads a 16-frame timer. While it is nonzero, the hurt block
+  overrides normal movement animation. The game-over screen also re-enables
+  sprite 0 at a fixed centered position with the same hurt block.
 - Activated disappearing platforms use character indices 60-62; untriggered
   gray platforms continue to use the shared rectangular transition glyphs.
 - Spring platforms reuse six character slots that were blank inside the dial
@@ -123,11 +170,14 @@ The four player animation blocks are memory frames selected by hardware sprite
 - Spring cells use purple Color RAM foreground; fragment transitions move that
   color one row upward with the spring while all other platform masks stay black.
 - Conveyor cells use green Color RAM foreground and black cut-out arrows. During
-  gameplay they reuse character slots 19-22; menu entry restores the original
-  N/S/-/H glyphs before drawing any title or prompt text.
+  gameplay they reuse N/S/dash/V. H remains stable for the HP label; modal entry
+  restores N/S/dash/V before drawing any title or prompt text.
 - Each conveyor direction shares its FULL character with its LOWER transition
   fragment. The full arrow bitmap must be restored before a completed coarse
   scroll is flipped to the visible screen.
+- The centering prompt temporarily installs W/C/Y/U in transition glyph slots
+  31-34. No transition cells are visible on the modal screen, and the first
+  gameplay transition rebuilds all four slots before using them.
 - Conveyor support is resolved inside the vertical collision state machine and
   uses an independent delay counter to push two pixels every three frames after
   the normal paddle movement.
