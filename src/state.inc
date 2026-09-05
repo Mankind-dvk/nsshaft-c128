@@ -32,9 +32,11 @@ fragment_split:
     .byte 7
 fragment_count:
     .byte 1
-; 每次减到 0 才调用 scroll_one_pixel_up。
-speed_counter:
-    .byte SCROLL_DELAY
+; 8 位滚动相位。每帧 accumulator += rate，产生进位时世界上移一像素。
+scroll_accumulator:
+    .byte 0
+scroll_rate:
+    .byte SCROLL_RATE_LEVEL_0
 ; 底部还要生成多少个空逻辑行；0 表示本次应生成平台。
 rows_until_platform:
     .byte 2
@@ -48,6 +50,14 @@ platform_width:
     .byte 0
 platform_type:
     .byte 0
+; 平台生成档位由首次落地分数更新。普通平台不受连续次数限制；其他类型用
+; last/run_length 阻止第三个相同平台连续出现。
+platform_generation_level:
+    .byte 0
+last_generated_platform_type:
+    .byte $ff
+generated_type_run_length:
+    .byte 0
 platform_start_limit:
     .byte 0
 platform_middle_count:
@@ -58,6 +68,35 @@ selected_platform_color:
     .byte COLOR_BLACK
 
 ; --- Paddle、HUD 与音乐 ---------------------------------------------------
+; 六个独立十进制位从最高位到最低位连续排列。这样既不需要 16 位除法，也不
+; 需要会影响 SID IRQ 的十进制模式；HUD 可直接把每一位转换为数字字符。
+score_digits:
+    .res SCORE_DIGIT_COUNT, 0
+score_digits_end:
+.assert score_digits_end-score_digits = SCORE_DIGIT_COUNT, error, "score digit count mismatch"
+
+; HP 是可吸收的伤害次数，0 表示下一次尖刺/顶框伤害会结束游戏。每得到一个
+; 新平台分数就推进 progress，累计三次后 HP+1，分数本身保持不变。
+health_points:
+    .byte 0
+health_score_progress:
+    .byte 0
+health_decimal_work:
+    .byte 0
+health_hundreds:
+    .byte 0
+health_tens:
+    .byte 0
+health_ones:
+    .byte 0
+
+; 每个游戏区逻辑行对应一个平台计分状态：0=没有平台、$01=尚未得分、
+; $81=已经首次落地得分。粗滚动时此表与字符行同步上移。
+platform_score_rows:
+    .res PLAYFIELD_ROW_COUNT, 0
+platform_score_rows_end:
+.assert platform_score_rows_end-platform_score_rows = PLAYFIELD_ROW_COUNT, error, "platform score row count mismatch"
+
 ; SID 返回的原始 0..255 POTX 值；128 附近是中立位置。
 potx_raw:
     .byte 128
@@ -71,23 +110,38 @@ potx_ones:
     .byte 8
 dashboard_pointer_state:
     .byte $ff
-; music_step 是 0..127 的八分音符索引；accumulator 溢出时才前进一步。
+; music_step 是 0..127 的八分音符索引。音乐相位采用模 512 的 9 位累加器，
+; low 保存低 8 位，high 只会是 0 或 1；increment 由分数档位同步更新。
 music_step:
     .byte 0
-music_tempo_accumulator:
+music_tempo_accumulator_low:
     .byte 0
+music_tempo_accumulator_high:
+    .byte 0
+music_tempo_increment:
+    .byte MUSIC_TEMPO_LEVEL_0
 music_gate_timer:
     .byte 0
 music_voice3_delay:
     .byte 0
 
 ; --- 玩家位置与垂直物理 ---------------------------------------------------
+; 标题画面锁定的角色索引：0=Elien、1=Ember、2=Wasser。new_game 不清除此值，
+; 因此游戏物理、受伤帧和 Game Over 都使用同一套皮肤。
+selected_character:
+    .byte CHARACTER_ELIEN
+; 非中立位置按 Fire 后的最短受伤反馈时间；松开前始终保持 hurt 帧。
+character_select_hurt_timer:
+    .byte 0
 ; VIC sprite X 是 9 位：低八位写 $d000，第九位写 $d010 bit 0。
 player_x_low:
     .byte 0
 player_x_high:
     .byte 0
 player_move_counter:
+    .byte 0
+; 扣除 HP 后短暂强制使用 hurt 位图；每次选帧时减一，到 0 恢复运动帧。
+player_hurt_timer:
     .byte 0
 ; 与 paddle 的 player_move_counter 分开；值 2 表示本次推动后跳过两帧。
 conveyor_move_counter:

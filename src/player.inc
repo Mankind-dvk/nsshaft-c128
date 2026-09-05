@@ -27,7 +27,8 @@
 initialize_player:
     ; 输入：seed_platforms 留下的最低平台 start/width，fine_scroll=7。
     ; 输出：配置硬件 sprite 0，并把玩家水平居中放到第 22 行出生平台。
-    lda #PLAYER_NORMAL_BLOCK
+    ldy selected_character
+    lda character_normal_blocks, y
     sta SPRITE_POINTER_A
     sta SPRITE_POINTER_B
 
@@ -37,10 +38,11 @@ initialize_player:
     sta VIC_SPRITE_Y_EXPAND
     sta VIC_SPRITE_PRIORITY
     sta player_move_counter
+    sta player_hurt_timer
     sta conveyor_move_counter
 
     ; Spritemate 位图只描述透明/实心像素，实际颜色由 sprite 0 寄存器决定。
-    lda #COLOR_YELLOW
+    lda character_color_table, y
     sta VIC_SPRITE_0_COLOR
 
     lda #22
@@ -55,10 +57,19 @@ initialize_player:
 ; 根据最终的逐帧物理状态选择 sprite 0 的一帧。下落优先于水平输入；
 ; 站在平台上时，paddle 死区显示 normal，死区两侧显示 left/right。
 ; 两张屏幕的指针表必须同步更新，否则 D018 双缓冲翻页时人物会闪回旧帧。
-; EN: Select fall/normal/left/right bitmap and mirror both sprite pointer tables.
+; EN: Select hurt/fall/normal/left/right bitmap and mirror both pointer tables.
 update_player_sprite_frame:
     ; 输入：player_on_platform 与 potx_raw。输出：同步修改 A/B 两张屏幕的
-    ; sprite 0 指针。这里只换位图块号，不复制 63 字节，所以每帧成本很低。
+    ; sprite 0 指针。hurt_timer 非零时受伤帧拥有最高优先级；这里只换位图
+    ; 块号，不复制 63 字节，所以每帧成本很低。
+    ldy selected_character
+    lda player_hurt_timer
+    beq @select_motion
+    dec player_hurt_timer
+    lda character_hurt_blocks, y
+    bne @store
+
+@select_motion:
     lda player_on_platform
     beq @fall
 
@@ -67,17 +78,17 @@ update_player_sprite_frame:
     bcc @left
     cmp #POTX_DEADZONE_HIGH+1
     bcs @right
-    lda #PLAYER_NORMAL_BLOCK
+    lda character_normal_blocks, y
     bne @store
 
 @fall:
-    lda #PLAYER_FALL_BLOCK
+    lda character_fall_blocks, y
     bne @store
 @left:
-    lda #PLAYER_LEFT_BLOCK
+    lda character_left_blocks, y
     bne @store
 @right:
-    lda #PLAYER_RIGHT_BLOCK
+    lda character_right_blocks, y
 @store:
     sta SPRITE_POINTER_A
     sta SPRITE_POINTER_B
@@ -229,7 +240,7 @@ update_player_vertical:
     ; 比较中把“相等”也归入越界，而不会晚一个像素。
     cmp #(PLAYER_TOP_GAME_OVER_Y+1)
     bcs @supported_in_bounds
-    jmp request_game_over
+    jmp handle_top_damage
 @supported_in_bounds:
 
     ; 走出当前支撑平台的范围后开始下落。
@@ -250,7 +261,7 @@ update_player_vertical:
     beq @supported_conveyor
     jmp @begin_fall
 @hit_spikes:
-    jmp request_game_over
+    jmp handle_spike_damage
 @supported_normal:
     jsr cancel_spring_platform
     lda #0
@@ -310,7 +321,7 @@ update_player_vertical:
     lda player_y
     cmp #(PLAYER_TOP_GAME_OVER_Y+1)
     bcs @rise_in_bounds
-    jmp request_game_over
+    jmp handle_top_damage
 @rise_in_bounds:
     lda player_fall_fraction
     clc
@@ -328,7 +339,7 @@ update_player_vertical:
     sta VIC_SPRITE_0_Y
     cmp #(PLAYER_TOP_GAME_OVER_Y+1)
     bcs @rise_pixel
-    jmp request_game_over
+    jmp handle_top_damage
 @decelerate_rise:
     dec player_rise_velocity
     bne @done
@@ -384,7 +395,10 @@ update_player_vertical:
     beq @land
     jmp @fall_done
 @fall_on_spikes:
-    jmp request_game_over
+    ; 尖刺仍然是一个真正到达的新平台：先领取该行的一次性分数，再执行
+    ; 扣 HP/反弹或死亡。claimed 标志保证同一尖刺不会反复刷分。
+    jsr award_platform_landing_score
+    jmp handle_spike_damage
 @fall_done:
     rts
 
@@ -394,6 +408,10 @@ update_player_vertical:
     rts
 
 @land:
+    ; 碰撞行对应的平台只有第一次从空中落上去时得分。平台自己的 claimed 位
+    ; 会随字符行滚动，所以弹簧弹起后重落、走开后回到旧平台都不会重复加分。
+    jsr award_platform_landing_score
+
     lda collision_row
     sta spawn_row
 

@@ -1,5 +1,5 @@
 
-// 4 sprites generated with spritemate on 2026/8/20 06:21:30
+// 16 sprites generated with spritemate on 2026/8/24 20:53:22
 // Byte 64 of each sprite contains multicolor (high nibble) & color (low nibble) information
 
 LDA #$08 // sprite multicolor 1
@@ -8,7 +8,7 @@ LDA #$06 // sprite multicolor 2
 STA $D026
 
 
-// sprite 1 / singlecolor / color: $04
+// sprite 1 / singlecolor / color: $07
 elien_normal:
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
@@ -17,20 +17,9 @@ elien_normal:
 .BYTE $F8,$1F,$3C,$F8,$07,$3C,$E0,$07
 .BYTE $3C,$E0,$3F,$3C,$FC,$3F,$FF,$FC
 .BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
-.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$07
 
-// sprite 2 / singlecolor / color: $04
-elien_fall:
-.BYTE $00,$00,$00,$00,$00,$00,$01,$99
-.BYTE $80,$01,$99,$80,$01,$FF,$80,$03
-.BYTE $FF,$C0,$03,$FF,$C0,$1F,$FF,$F8
-.BYTE $1F,$7E,$F8,$07,$BD,$E0,$07,$DB
-.BYTE $E0,$3F,$BD,$FC,$3F,$7E,$FC,$0F
-.BYTE $FF,$F0,$0F,$C3,$F0,$03,$81,$C0
-.BYTE $01,$E7,$80,$00,$E7,$00,$00,$00
-.BYTE $00,$00,$00,$00,$00,$00,$00,$04
-
-// sprite 3 / singlecolor / color: $04
+// sprite 2 / singlecolor / color: $07
 elien_right:
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
@@ -39,10 +28,10 @@ elien_right:
 .BYTE $F8,$3F,$9E,$78,$07,$9E,$60,$07
 .BYTE $9E,$60,$7F,$9E,$7C,$7F,$FF,$FC
 .BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
-.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$07
 
-// sprite 4 / singlecolor / color: $04
-elien_left:
+// sprite 3 / singlecolor / color: $07
+elien:
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
 .BYTE $00,$00,$00,$00,$00,$00,$00,$00
 .BYTE $18,$00,$01,$98,$C0,$01,$FF,$C0
@@ -50,4 +39,147 @@ elien_left:
 .BYTE $FC,$1E,$79,$FC,$06,$79,$E0,$06
 .BYTE $79,$E0,$3E,$79,$FE,$3F,$FF,$FE
 .BYTE $0F,$FF,$F0,$0F,$FF,$F0,$03,$81
-.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$04
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$07
+
+// sprite 4 / singlecolor / color: $07
+elien_fall:
+.BYTE $00,$00,$00,$00,$00,$00,$01,$99
+.BYTE $80,$01,$99,$80,$01,$FF,$80,$03
+.BYTE $FF,$C0,$03,$FF,$C0,$1F,$FF,$F8
+.BYTE $1F,$7E,$F8,$07,$BD,$E0,$07,$DB
+.BYTE $E0,$3F,$BD,$FC,$3F,$7E,$FC,$0F
+.BYTE $FF,$F0,$0F,$C3,$F0,$03,$81,$C0
+.BYTE $01,$E7,$80,$00,$E7,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$07
+
+// sprite 5 / singlecolor / color: $07
+elien_hurt:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $18,$00,$01,$99,$80,$01,$FF,$80
+.BYTE $03,$FF,$C0,$03,$FF,$C0,$1F,$FF
+.BYTE $F8,$1F,$3C,$F8,$07,$3C,$E0,$07
+.BYTE $3C,$E0,$3F,$3C,$FC,$3F,$E6,$FC
+.BYTE $0F,$DA,$F0,$0F,$FF,$F0,$03,$81
+.BYTE $C0,$03,$81,$C0,$03,$81,$C0,$07
+
+// sprite 6 / singlecolor / color: $02
+ember_normal:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$18
+.BYTE $00,$00,$18,$00,$00,$3C,$00,$02
+.BYTE $7E,$40,$06,$7E,$60,$06,$FF,$60
+.BYTE $0E,$FF,$70,$0F,$FF,$F0,$1F,$FF
+.BYTE $F8,$1F,$FF,$F8,$1F,$3C,$F8,$1F
+.BYTE $3C,$F8,$1F,$3C,$F8,$0F,$3C,$F0
+.BYTE $0F,$FF,$F0,$07,$FF,$E0,$03,$FF
+.BYTE $C0,$01,$C3,$80,$01,$C3,$80,$02
+
+// sprite 7 / singlecolor / color: $02
+ember_left:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$03
+.BYTE $00,$00,$1E,$00,$00,$3E,$0C,$00
+.BYTE $7C,$38,$03,$7C,$78,$06,$FF,$70
+.BYTE $0E,$FF,$F0,$0E,$FF,$F0,$1F,$FF
+.BYTE $F8,$1F,$FF,$F8,$1E,$79,$F8,$1E
+.BYTE $79,$F8,$1E,$79,$F8,$0E,$79,$F0
+.BYTE $0F,$FF,$F0,$07,$FF,$E0,$03,$FF
+.BYTE $C0,$01,$C3,$80,$01,$C3,$80,$02
+
+// sprite 8 / singlecolor / color: $02
+emeber_right:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$C0
+.BYTE $00,$00,$78,$00,$30,$7C,$00,$1C
+.BYTE $3E,$00,$1E,$3E,$C0,$0E,$FF,$60
+.BYTE $0F,$FF,$70,$0F,$FF,$70,$1F,$FF
+.BYTE $F8,$1F,$FF,$F8,$1F,$9E,$78,$1F
+.BYTE $9E,$78,$1F,$9E,$78,$0F,$9E,$70
+.BYTE $0F,$FF,$F0,$07,$FF,$E0,$03,$FF
+.BYTE $C0,$01,$C3,$80,$01,$C3,$80,$02
+
+// sprite 9 / singlecolor / color: $02
+ember_fall:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$18
+.BYTE $00,$00,$18,$00,$00,$3C,$00,$02
+.BYTE $7E,$40,$06,$7E,$60,$06,$FF,$60
+.BYTE $0E,$FF,$70,$0F,$FF,$F0,$1F,$FF
+.BYTE $F8,$1F,$FF,$F8,$1F,$FF,$F8,$1F
+.BYTE $FF,$F8,$1F,$FF,$F8,$0E,$18,$70
+.BYTE $0F,$3C,$F0,$07,$3C,$E0,$03,$FF
+.BYTE $C0,$00,$FF,$00,$00,$3C,$00,$02
+
+// sprite 10 / singlecolor / color: $02
+ember_hurt:
+.BYTE $00,$00,$00,$00,$18,$00,$0E,$18
+.BYTE $70,$3C,$BD,$3C,$1C,$FF,$38,$1E
+.BYTE $FF,$70,$0E,$FF,$72,$2E,$FF,$72
+.BYTE $1D,$FF,$F8,$1A,$FF,$F8,$5D,$FF
+.BYTE $FA,$7E,$DB,$7E,$3E,$18,$7C,$1F
+.BYTE $3C,$F8,$1F,$3C,$F8,$0F,$FF,$F0
+.BYTE $0F,$E7,$F0,$07,$DB,$E0,$03,$FF
+.BYTE $C0,$01,$C3,$80,$01,$C3,$80,$02
+
+// sprite 11 / singlecolor / color: $03
+wasser_normal:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$3C,$00,$00,$F3,$00,$03,$FD
+.BYTE $C0,$07,$FE,$E0,$0F,$FF,$70,$0F
+.BYTE $FF,$B0,$1F,$3C,$B8,$1F,$3C,$B8
+.BYTE $1F,$3C,$B8,$1F,$3C,$F8,$0F,$FF
+.BYTE $F0,$07,$FF,$E0,$03,$FF,$C0,$03
+
+// sprite 12 / singlecolor / color: $03
+wasser_left:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$3C,$00,$00,$F3,$00,$03,$FD
+.BYTE $C0,$07,$FE,$E0,$0F,$FF,$70,$0F
+.BYTE $FF,$B0,$1E,$79,$B8,$1E,$79,$B8
+.BYTE $1E,$79,$B8,$1E,$79,$F8,$0F,$FF
+.BYTE $F0,$07,$FF,$E0,$03,$FF,$C0,$03
+
+// sprite 13 / singlecolor / color: $03
+wasser_right:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$3C,$00,$00,$F3,$00,$03,$FD
+.BYTE $C0,$07,$FE,$E0,$0F,$FF,$70,$0F
+.BYTE $FF,$70,$1F,$9E,$78,$1F,$9E,$78
+.BYTE $1F,$9E,$78,$1F,$9E,$78,$0F,$FF
+.BYTE $F0,$07,$FF,$E0,$03,$FF,$C0,$03
+
+// sprite 14 / singlecolor / color: $03
+wasser_fall:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$3C,$00,$00
+.BYTE $FB,$00,$03,$FD,$C0,$07,$FE,$E0
+.BYTE $0E,$7E,$70,$0E,$7E,$70,$1E,$7E
+.BYTE $78,$1E,$7E,$38,$1F,$FF,$B8,$1F
+.BYTE $FF,$B8,$1F,$FF,$78,$0F,$E7,$70
+.BYTE $0F,$E6,$F0,$07,$FE,$E0,$03,$FD
+.BYTE $C0,$00,$FB,$00,$00,$3C,$00,$03
+
+// sprite 15 / singlecolor / color: $03
+wasser_hurt:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$06
+.BYTE $00,$10,$04,$01,$90,$0D,$C7,$80
+.BYTE $08,$FE,$20,$00,$F3,$00,$03,$FD
+.BYTE $C0,$07,$FE,$E0,$0F,$FF,$70,$0F
+.BYTE $FF,$B0,$1D,$FB,$B8,$1E,$F7,$B8
+.BYTE $5F,$6F,$BA,$9E,$F7,$F8,$0D,$FB
+.BYTE $F2,$67,$FF,$E4,$7F,$FF,$FC,$03
+
+// sprite 16 / singlecolor / color: $05
+sprite5:
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$00
+.BYTE $00,$00,$00,$00,$00,$00,$00,$05

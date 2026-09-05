@@ -13,11 +13,9 @@
 ; 调用者不应依赖例程返回后的 A/X/Y。
 ;
 ; English summary:
-;   Generates width, legal X position, and one of six platform types from one
-;   seeded 16-bit LFSR. random_byte advances eight LFSR bits and returns a mixed
-;   byte in A; X is preserved for seed_platforms. randomize_platform writes the
-;   platform_* state bytes. draw_platform expects ROW_PTR to name the target row
-;   and writes both its screen codes and shared Color RAM.
+;   Generates width, legal X position, and a score-gated weighted platform type
+;   from one seeded 16-bit LFSR. Normal platforms may repeat; every other type is
+;   capped at two consecutive results. X is preserved for seed_platforms.
 
 .segment "CODE"
 
@@ -48,7 +46,21 @@ seed_platforms:
 .endif
     sta platform_type
 @draw:
+    ; randomize_platform 只提出候选；出生平台可能在上方被测试配置覆盖。
+    ; 因此必须到最终 platform_type 已确定后，才更新连续类型记录。
+    jsr commit_generated_platform_type
     jsr draw_platform
+
+    ; 平台计分状态按游戏区相对行保存。出生平台直接标成已领取，避免人物离开
+    ; 后重新落回出生台阶时获得第一分；其余初始平台等待首次落地。
+    ldy seed_platform_score_index, x
+    lda #PLATFORM_SCORE_UNCLAIMED
+    cpx #SEED_PLATFORM_COUNT-1
+    bne @store_score_state
+    lda #PLATFORM_SCORE_CLAIMED
+@store_score_state:
+    sta platform_score_rows, y
+
     inx
     cpx #SEED_PLATFORM_COUNT
     bne @loop
@@ -116,15 +128,63 @@ random_byte:
     eor random_state_high
     rts
 
+.segment "EXTCODE"
+
+; EN: Reset score-gated type selection and consecutive-platform history.
+initialize_platform_generation:
+    lda #0
+    sta platform_generation_level
+    sta generated_type_run_length
+    lda #$ff
+    sta last_generated_platform_type
+    rts
+
+; 根据首次落地分数选择五档平台池：0..4、5..9、10..19、20..39、40+。
+; 高四位十进制数字非零时必然已经超过 40，直接使用最高档。
+; EN: Map the decimal score to generation levels at 5, 10, 20, and 40 points.
+update_platform_generation_level:
+    lda score_digits
+    ora score_digits+1
+    ora score_digits+2
+    ora score_digits+3
+    bne @level_4
+
+    lda score_digits+4
+    beq @under_ten
+    cmp #1
+    beq @level_2
+    cmp #4
+    bcs @level_4
+    lda #3
+    bne @store
+
+@under_ten:
+    lda score_digits+5
+    cmp #5
+    bcc @level_0
+    lda #1
+    bne @store
+@level_0:
+    lda #0
+    beq @store
+@level_2:
+    lda #2
+    bne @store
+@level_4:
+    lda #PLATFORM_GENERATION_LEVEL_MAX
+@store:
+    sta platform_generation_level
+    rts
+
 ; 平台宽度为 7..12 个字符。平台始终位于青色外框与分隔条之间，绝不会
 ; 覆盖 UI 字符。
-; EN: Produce unbiased width, legal start column, and type in platform_* state.
+; EN: Produce unbiased width/start plus a weighted, score-gated platform type.
 randomize_platform:
     ; 输出：
     ;   platform_width = 7..12 字符；
     ;   platform_start = 当前宽度下不会越过游戏区的合法起始列；
-    ;   platform_type  = 0..5。
-    ; “随机后拒绝”的循环避免简单取模在范围不是 2 的幂时产生偏差。
+    ;   platform_type  = 当前分数档允许的加权类型。
+    ; 宽度/位置的“随机后拒绝”避免范围不是 2 的幂时产生取模偏差。
 @choose_width:
     jsr random_byte
     and #%00000111
@@ -150,16 +210,79 @@ randomize_platform:
     adc #PLAYFIELD_FIRST_COLUMN
     sta platform_start
 
-    ; 平台类型也使用同一条 PRNG 序列：0=普通、1=尖刺、2=消失、3=弹簧、
-    ; 4=向左传送、5=向右传送。屏蔽后得到 0..7，再拒绝 6/7，避免用简单
-    ; 取模令某些类型概率更高；六种平台因此各占约六分之一。
+    ; 类型池长度固定为 4 或 8，所以可直接用 AND 取得无偏索引。每档的偏移
+    ; 和掩码把同一随机字节映射到对应权重表。普通平台允许无限连续；其他
+    ; 类型若已经连续两个，则消耗新的 PRNG 字节重选，绝不会生成第三个。
 @choose_type:
     jsr random_byte
-    and #%00000111
-    cmp #PLATFORM_TYPE_COUNT
-    bcs @choose_type
+    ldy platform_generation_level
+    and platform_type_pool_mask, y
+    clc
+    adc platform_type_pool_offset, y
+    tay
+    lda platform_type_pool, y
     sta platform_type
+    beq @type_ready
+    cmp last_generated_platform_type
+    bne @type_ready
+    lda generated_type_run_length
+    cmp #PLATFORM_REPEAT_LIMIT
+    bcs @choose_type
+@type_ready:
     rts
+
+; 只有实际要绘制的平台才进入历史。普通平台重复时把长度保持为 1，既表示
+; 它是最近类型，又避免长局中计数器溢出；普通平台本身从不检查该上限。
+; EN: Commit the final drawn type; normal is exempt and cannot overflow the run.
+commit_generated_platform_type:
+    lda platform_type
+    cmp last_generated_platform_type
+    bne @new_type
+    cmp #PLATFORM_TYPE_NORMAL
+    beq @normal_repeat
+    inc generated_type_run_length
+    rts
+@normal_repeat:
+    lda #1
+    sta generated_type_run_length
+    rts
+@new_type:
+    sta last_generated_platform_type
+    lda #1
+    sta generated_type_run_length
+    rts
+
+; 五个档位的普通平台概率依次为 75%、50%、37.5%、25%、12.5%。
+; 非普通类型逐步解锁：弹簧 -> 消失 -> 双向传送 -> 尖刺。
+platform_type_pool_offset:
+    .byte 0, 4, 8, 16, 24
+platform_type_pool_mask:
+    .byte 3, 3, 7, 7, 7
+platform_type_pool:
+    ; 0..4 分：75% 普通，25% 弹簧。
+    .byte PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_NORMAL
+    .byte PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_SPRING
+    ; 5..9 分：50% 普通，25% 消失，25% 弹簧。
+    .byte PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_NORMAL
+    .byte PLATFORM_TYPE_FADE, PLATFORM_TYPE_SPRING
+    ; 10..19 分：37.5% 普通，并解锁左右传送。
+    .byte PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_NORMAL
+    .byte PLATFORM_TYPE_FADE, PLATFORM_TYPE_SPRING, PLATFORM_TYPE_SPRING
+    .byte PLATFORM_TYPE_CONVEYOR_LEFT, PLATFORM_TYPE_CONVEYOR_RIGHT
+    ; 20..39 分：25% 普通，并首次解锁尖刺。
+    .byte PLATFORM_TYPE_NORMAL, PLATFORM_TYPE_NORMAL
+    .byte PLATFORM_TYPE_SPIKES, PLATFORM_TYPE_FADE, PLATFORM_TYPE_FADE
+    .byte PLATFORM_TYPE_SPRING
+    .byte PLATFORM_TYPE_CONVEYOR_LEFT, PLATFORM_TYPE_CONVEYOR_RIGHT
+    ; 40+ 分：12.5% 普通，提高尖刺和消失平台权重。
+    .byte PLATFORM_TYPE_NORMAL
+    .byte PLATFORM_TYPE_SPIKES, PLATFORM_TYPE_SPIKES
+    .byte PLATFORM_TYPE_FADE, PLATFORM_TYPE_FADE, PLATFORM_TYPE_SPRING
+    .byte PLATFORM_TYPE_CONVEYOR_LEFT, PLATFORM_TYPE_CONVEYOR_RIGHT
+platform_type_pool_end:
+.assert platform_type_pool_end-platform_type_pool = 32, error, "platform type pool size mismatch"
+
+.segment "CODE"
 
 ; EN: Draw platform_* to ROW_PTR and set matching shared Color RAM cells.
 draw_platform:

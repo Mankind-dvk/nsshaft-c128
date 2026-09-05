@@ -54,6 +54,7 @@ scroll_one_pixel_up:
 @coarse_step:
     lda #7
     sta fine_scroll
+    jsr advance_platform_score_rows
     jsr complete_fragment_transition
     jsr advance_fade_platform_scroll_position
     jsr advance_spring_platform_scroll_position
@@ -565,7 +566,12 @@ generate_bottom_row:
 
 @add_platform:
     jsr randomize_platform
+    jsr commit_generated_platform_type
     jsr draw_platform
+
+    ; 新平台位于游戏区最后一个逻辑行，等待玩家第一次落地领取分数。
+    lda #PLATFORM_SCORE_UNCLAIMED
+    sta platform_score_rows+PLAYFIELD_ROW_COUNT-1
 
     lda #PLATFORM_GAP_ROWS
     sta rows_until_platform
@@ -619,6 +625,37 @@ show_game_over_screen:
     inx
     cpx #9
     bne @title
+
+    ; 游戏画面和模态画面共用硬件 sprite 0。清屏已经清除了指针表，所以要在
+    ; 此处重新写入 hurt 块号、固定坐标和单色寄存器，然后只启用 sprite 0。
+    jsr show_game_over_player
+    jmp draw_action_prompt
+
+; EN: Center the hurt frame between GAME OVER and PRESS FIRE using sprite 0.
+show_game_over_player:
+    ldy selected_character
+    lda character_hurt_blocks, y
+    sta SPRITE_POINTER_A
+    sta SPRITE_POINTER_B
+
+    lda #GAME_OVER_PLAYER_X
+    sta VIC_SPRITE_0_X
+    lda #GAME_OVER_PLAYER_Y
+    sta VIC_SPRITE_0_Y
+    lda VIC_SPRITE_X_HIGH
+    and #%11111110
+    sta VIC_SPRITE_X_HIGH
+
+    lda #0
+    sta VIC_SPRITE_MULTICOLOR
+    sta VIC_SPRITE_X_EXPAND
+    sta VIC_SPRITE_Y_EXPAND
+    sta VIC_SPRITE_PRIORITY
+    lda character_color_table, y
+    sta VIC_SPRITE_0_COLOR
+    lda #%00000001
+    sta VIC_SPRITE_ENABLE
+    rts
 
 ; EN: Mirror the ten-character action prompt into both screen buffers.
 draw_action_prompt:

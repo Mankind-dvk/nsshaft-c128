@@ -26,6 +26,9 @@ main.s
   -> platforms.inc
   -> input.inc
   -> hud.inc
+  -> score.inc
+  -> health.inc
+  -> character_select.inc
   -> player.inc
   -> fade_platforms.inc
   -> spring_platforms.inc
@@ -54,14 +57,17 @@ project in this order:
 1. `src/main.s`: startup, new-game initialization, and per-frame call order.
 2. `src/constants.inc`: hardware addresses and tuning values referenced elsewhere.
 3. `src/state.inc`: the mutable state the program actually stores.
-4. `src/input.inc` and `src/hud.inc`: the shortest complete input-to-display path.
-5. `src/platforms.inc`: PRNG use, address tables, and `(pointer),Y` screen writes.
-6. `src/player.inc`: 9-bit coordinates, fixed-point speed, and collision states.
-7. `src/video.inc`: double buffering and custom-character pixel scrolling.
-8. `src/fade_platforms.inc`, `src/spring_platforms.inc`, and
+4. `src/input.inc`, `src/hud.inc`, and `src/score.inc`: short complete paths for
+   input, decimal display, and fixed-point scroll scheduling.
+5. `src/character_select.inc`: POTX character selection, Fire debouncing, and
+   shared character frame lookup tables.
+6. `src/platforms.inc`: PRNG use, address tables, and `(pointer),Y` screen writes.
+7. `src/player.inc`: 9-bit coordinates, fixed-point speed, and collision states.
+8. `src/video.inc`: double buffering and custom-character pixel scrolling.
+9. `src/fade_platforms.inc`, `src/spring_platforms.inc`, and
    `src/conveyor_platforms.inc`: platform lifecycles and runtime glyph reuse.
-9. `src/music.inc`: raster IRQ handling and SID playback.
-10. `src/assets.inc`: binary glyph and sprite data when graphics need editing.
+10. `src/music.inc`: raster IRQ handling and SID playback.
+11. `src/assets.inc`: binary glyph and sprite data when graphics need editing.
 
 ## 3. ca65 and 6502 syntax quick reference
 
@@ -152,13 +158,16 @@ Decimal 7424 is hexadecimal `$1d00`, the address of `start`.
 | `$0400-$07ff` | Screen buffer A and its sprite pointer table |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointer table |
 | `$1c01-$1c0c` | BASIC 7 loader line |
-| `$1d00-$269a` | Main loop, video, HUD, platform generation, and state |
+| `$1d00-$27e4` | Main loop, video, HUD, scoring, platform drawing, and state |
 | `$2800-$29ff` | 64-character custom character set |
-| `$2a00-$2dae` | SID player and arrangement data |
+| `$2a00-$2dc2` | SID player and arrangement data |
 | `$2e00-$2f37` | Disappearing-platform effect code |
 | `$3000-$30ff` | Four player sprite frames |
 | `$3100-$313f` | Writable dial-hand sprite |
-| `$3140-$37a7` | Player physics, spring, and conveyor code |
+| `$3140-$37d4` | Player physics, spring, and conveyor code |
+| `$3800-$39ed` | Weighted platform generation, HP display, and hazard recovery |
+| `$3a00-$3cbf` | Elien hurt plus all five Ember and five Wasser frames |
+| `$3cc0-$3e8f` | Character-selection code, prompt glyphs, and frame/color tables |
 | `$d800-$dbff` | Color RAM |
 
 These fixed addresses are not arbitrary. VIC-IIe character sets and sprite
@@ -177,7 +186,12 @@ cannot silently overwrite graphics data.
 4. CIA2 selects VIC bank 0, covering `$0000-$3fff`.
 5. VIC-IIe character mode, colors, and screen A are configured.
 6. Paddle input is initialized and stale SID state is silenced.
-7. The title screen is displayed and waits for an action button.
+7. The title displays Elien, Ember, and Wasser as three candidate sprites.
+8. POTX thirds highlight a character and the first Fire locks that choice.
+9. The locked character displays `PRESS FIRE WHEN CHARACTER FACES YOU` and uses
+   left/normal/right frames as a neutral-position cue. Only a second Fire in the
+   108..148 forward-facing range starts the game; off-center Fire displays hurt
+   for at least 12 frames and requires another press.
 
 ### 6.2 `new_game`
 
@@ -186,8 +200,8 @@ cannot silently overwrite graphics data.
 1. Disable sprites and reset screen-flip and game-over state.
 2. Clear both screen matrices and Color RAM.
 3. Reset fade and spring state, then install runtime conveyor glyphs.
-4. Seed the PRNG and create five initial platforms.
-5. Draw the fixed UI, POTX display, and dial.
+4. Seed the PRNG, clear score/claim state, and create five initial platforms.
+5. Draw the fixed UI and score, then initialize the POTX display and dial.
 6. Place the player on the lowest safe platform.
 7. Initialize SID music.
 8. Copy the complete screen A image into screen B.
@@ -202,11 +216,12 @@ wait for the frame boundary
   -> update the five-position hand and digits
   -> update horizontal movement
   -> update vertical physics and collision
+  -> add one point on the first landing on an unclaimed platform
   -> update disappearing-platform timers
   -> update spring timers
   -> select the player sprite frame
   -> test game over
-  -> advance platforms by one pixel when the speed counter expires
+  -> accumulate scroll phase; on carry, move one pixel
 ```
 
 Platform scrolling occurs after physics deliberately. The player first resolves
@@ -278,7 +293,26 @@ Every platform consumes random bytes in this order:
 
 1. Width from 7 through 12 characters.
 2. A legal horizontal starting column.
-3. Type from 0 through 5.
+3. A weighted type from the current score level.
+
+Score both changes scrolling speed and progressively unlocks platform types
+while reducing the normal-platform probability:
+
+| Score | Generated types | Normal probability |
+| ---: | --- | ---: |
+| 0..4 | normal and spring | 75% |
+| 5..9 | normal, spring, and disappearing | 50% |
+| 10..19 | previous types plus both conveyors | 37.5% |
+| 20..39 | all types, now including spikes | 25% |
+| 40+ | all types with extra spike/fade weight | 12.5% |
+
+Each pool contains either four or eight entries, so `AND 3` or `AND 7` produces
+an unbiased index. Normal platforms may repeat freely; every other individual
+type is limited to two consecutive results. A candidate that would become a
+third identical platform advances the same PRNG stream and selects again. Only
+the final drawn type is committed to `last_generated_platform_type` and
+`generated_type_run_length`, so the forced-normal starting platform is tracked
+correctly.
 
 There are six generated types plus one collision state for an activated fade
 platform:
@@ -286,7 +320,7 @@ platform:
 | Type | Collision result | Behavior |
 | --- | ---: | --- |
 | Normal | 1 | Safe support |
-| Spikes | 2 | Immediate game over |
+| Spikes | 2 | Score first contact, then spend 1 HP and bounce, or die at zero HP |
 | Inactive fade | 3 | Activate its timer and support the player |
 | Active fade | 4 | Continue support until deletion |
 | Spring | 5 | Compress and then launch the player |
@@ -377,9 +411,8 @@ implementation uses two techniques:
 
 1. Each direction lets FULL also serve as LOWER during a scroll transition, so
    only one additional UPPER glyph is required.
-2. Gameplay temporarily reuses the N, S, dash, and H title glyph slots. Before
-   entering a title or game-over screen, `restore_modal_font_glyphs` restores
-   their original bitmaps from a read-only template.
+2. Gameplay temporarily reuses the N, S, dash, and V title glyph slots. H stays
+   intact for the HP HUD. Modal entry restores N/S/dash/V from a template.
 
 ## 15. Five-position paddle control
 
@@ -395,17 +428,110 @@ implementation uses two techniques:
 and 1. The count includes the frame that performs the action, so reloading 2
 means the current frame plus two skipped frames.
 
-## 16. Sprite pointers and the five-position dial hand
+## 16. Six-digit score and scrolling difficulty
+
+Score counts first landings on new platforms. Each of the 21 logical playfield
+rows has one state byte: 0 means no platform, `$01` means unclaimed, and `$81`
+means claimed. A completed coarse scroll moves these states upward with their
+platform rows, and a newly generated bottom platform receives `$01`.
+
+Safe supporting platforms call `award_platform_landing_score` from the airborne
+`@land` path; spikes call the same routine from their dedicated
+`@fall_on_spikes` path. It converts `collision_row` to a playfield index and
+changes `$01` to `$81` while awarding one point. A spring bounce, walking away
+and returning, or continuing to stand on the platform cannot score again. The
+starting platform begins claimed, so returning to it also awards nothing. The
+panel displays `P:000000`.
+
+Spikes are the special non-supporting case that still counts as reached. After
+falling collision returns type 2, the code calls the same
+`award_platform_landing_score` before HP damage, bounce, or death. The claimed
+byte is already `$81`, so a later contact with that spike cannot score again.
+
+The six digits are stored as six consecutive bytes in the range 0 through 9,
+not as one binary integer. Incrementing carries from the ones digit to the left,
+and rendering only adds `CHAR_DIGIT_0`. This avoids both division and `SED`
+decimal mode. Avoiding `SED` matters because the SID IRQ may interrupt the main
+loop and must never inherit decimal arithmetic for its own `ADC` instructions.
+
+Scrolling uses an 8-bit phase accumulator rather than an integer frame delay:
+
+```text
+accumulator = accumulator + rate
+on carry: move the world 1 pixel
+```
+
+The initial `rate=128` averages 0.5 pixel per frame. Scores 20, 40, 60, and 80
+select rates 160, 192, 224, and an every-frame mode, corresponding to 1.25x,
+1.5x, 1.75x, and 2x the starting speed. The first three use the 8-bit phase
+accumulator. Exact 2x needs 256/256, which cannot fit in one byte, so
+`scroll_rate=0` is reserved as the one-pixel-every-frame sentinel. Because only
+new-platform landings add points, faster scrolling cannot generate score by
+itself and there is no acceleration feedback loop. The same score also updates
+the Section 10 generation pool at 5, 10, 20, and 40 points.
+
+The same speed level updates `music_tempo_increment`. Music uses a modulo-512
+9-bit phase accumulator with increments 44, 55, 66, 77, and 88. These represent
+exact 1x, 1.25x, 1.5x, 1.75x, and 2x ratios without rounding to an 8-bit integer.
+Only event spacing changes; SID frequency tables remain unchanged, so the music
+speeds up without being transposed. The five PAL rates are approximately 129,
+161, 193, 226, and 258 BPM.
+
+### 16.1 HP rewards and damage
+
+The next fixed status row displays `HP:000`. Each new-platform point increments
+`health_score_progress`; reaching 3 clears progress and increments
+`health_points` without changing the six score digits. HP is an 8-bit binary
+value and is converted to three decimal cells only when it changes.
+
+Spikes and the top frame share the "spend HP or request game over" decision but
+use different recovery motion:
+
+- Spike contact spends 1 HP, clears support, and assigns upward speed 16.
+- Top-frame contact spends 1 HP, moves the sprite eight pixels inside the frame,
+  clears support, and lets gravity resume.
+- Falling through the bottom bypasses HP and remains immediately fatal.
+
+Spending the last HP still absorbs the current hit and leaves `HP:000`; the next
+spike or top-frame hit is fatal. Moving away from the contact surface prevents
+one hazard from draining multiple HP on consecutive frames.
+Each absorbed hit also reloads `player_hurt_timer` to 16. The frame selector
+checks this timer first, so the selected character's hurt frame overrides fall,
+left, right, and normal for about 0.32 seconds. After clearing the game-over
+screen, the program restores sprite 0's pointer and shows that character's hurt
+frame at a fixed position between the two text rows. No additional hardware
+sprite is consumed.
+
+## 17. Character selection, sprite pointers, and the five-position dial hand
 
 The sprite pointer table stores an address divided by 64. For example, the
 normal player frame is at `$3000`, so its pointer is `$3000 / 64 = $c0`.
 
-All four player frames remain resident and animation only changes the pointer.
+Each of the three characters has resident normal/fall/right/left/hurt frames,
+for fifteen bitmap blocks in total. Elien's four movement frames occupy
+`$3000-$30ff`; Elien hurt and all ten Ember/Wasser frames occupy `$3a00-$3cbf`.
+`selected_character` is only 0, 1, or 2. It indexes five block-number tables so
+gameplay still points hardware sprite 0 at only one frame.
+
+The title selector temporarily enables hardware sprites 0..2 for the three
+normal previews. POTX ranges 0..84, 85..170, and 171..255 select Elien, Ember,
+and Wasser; unselected previews are gray. After the first Fire, only sprite 0
+remains. It uses left below 108, right above 148, and normal inside the neutral
+range. The second Fire must complete a press/release cycle while still neutral,
+preventing one long press from crossing both stages or starting with movement.
+
+The centering phase also displays `PRESS FIRE WHEN CHARACTER FACES YOU`.
+Previously missing W/C/Y/U glyphs temporarily occupy transition slots 31..34;
+no transition cells are visible on the modal screen, and the first gameplay
+transition rebuilds them before use. Off-center Fire points sprite 0 at the
+selected hurt block for at least 12 frames. Releasing Fire restores the latest
+left/right/normal direction, giving an explicit visual error response.
+
 The dial hand has one writable sprite block; changing position copies one of
 five 63-byte templates into it. The dial face uses characters and consumes no
 hardware sprite.
 
-## 17. SID raster IRQ
+## 18. SID raster IRQ
 
 Music must not depend on whether the main loop completes an expensive screen
 transition during a particular frame. The VIC-IIe therefore generates an IRQ at
@@ -414,7 +540,8 @@ raster line 240, while the main loop synchronizes at line 250.
 The IRQ path is:
 
 1. Write 1 to `$d019` to acknowledge the interrupt.
-2. Call `play_music_frame`.
+2. Call `play_music_frame`; its modulo-512 phase increment follows the current
+   score-speed tier.
 3. Jump to the C128 KERNAL restore path at `$ff33` to restore registers and MMU
    state.
 
@@ -422,7 +549,7 @@ Do not place the music IRQ and main-loop synchronization on the same raster
 line. The IRQ could return after the polling loop has missed that line, forcing
 the main loop to wait one additional frame.
 
-## 18. Safety checks when editing the code
+## 19. Safety checks when editing the code
 
 After every change, run at least:
 
@@ -436,6 +563,9 @@ Then inspect `build/nsshaft-c128.map`:
 - `CHARSET` must occupy exactly `$2800-$29ff`.
 - `MUSIC` and `EFFECTS` must not overlap the sprite region at `$3000`.
 - `GAMEPLAY` must end inside its linker-script reservation.
+- `EXTCODE` must end before `$3a00`.
+- `PLAYERSETS` must occupy exactly `$3a00-$3cbf`.
+- `SELECTCODE` must start at `$3cc0` and end before VIC bank 0 reaches `$4000`.
 
 Common problems:
 
@@ -448,9 +578,9 @@ Common problems:
 | Dial hand disappears | 63-byte templates and sprite 4 pointer `$3100/64` |
 | No sound | `$d01a/$d019`, SID volume, and VICE Sound settings |
 | Second round inherits old state | Whether the new variable is reset from `new_game` |
-| N/S/-/H become arrows on a modal screen | Call `restore_modal_font_glyphs` before drawing it |
+| N/S/-/V become arrows on a modal screen | Call `restore_modal_font_glyphs` before drawing it |
 
-## 19. Exercises for beginning assembly programmers
+## 20. Exercises for beginning assembly programmers
 
 1. Change `COLOR_YELLOW` and observe the player sprite color register.
 2. Change `PLATFORM_MIN_WIDTH` and verify that starting columns remain legal.
