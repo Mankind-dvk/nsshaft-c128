@@ -156,24 +156,12 @@ set_screen_copy_pointers:
     ; 无需为 A->B 和 B->A 写两套循环。
     lda active_screen
     beq @a_to_b
-    lda #<SCREEN_B
-    sta ROW_PTR
-    lda #>SCREEN_B
-    sta ROW_PTR+1
-    lda #<SCREEN_A
-    sta DEST_PTR
-    lda #>SCREEN_A
-    sta DEST_PTR+1
+    SET_WORD ROW_PTR, SCREEN_B
+    SET_WORD DEST_PTR, SCREEN_A
     rts
 @a_to_b:
-    lda #<SCREEN_A
-    sta ROW_PTR
-    lda #>SCREEN_A
-    sta ROW_PTR+1
-    lda #<SCREEN_B
-    sta DEST_PTR
-    lda #>SCREEN_B
-    sta DEST_PTR+1
+    SET_WORD ROW_PTR, SCREEN_A
+    SET_WORD DEST_PTR, SCREEN_B
     rts
 
 ; EN: Add one 40-byte row to ROW_PTR and DEST_PTR.
@@ -517,16 +505,10 @@ complete_fragment_transition:
 
     lda active_screen
     beq @bottom_b
-    lda #<(SCREEN_A + PLAYFIELD_BOTTOM_OFFSET)
-    sta ROW_PTR
-    lda #>(SCREEN_A + PLAYFIELD_BOTTOM_OFFSET)
-    sta ROW_PTR+1
+    SET_WORD ROW_PTR, (SCREEN_A + PLAYFIELD_BOTTOM_OFFSET)
     jmp generate_bottom_row
 @bottom_b:
-    lda #<(SCREEN_B + PLAYFIELD_BOTTOM_OFFSET)
-    sta ROW_PTR
-    lda #>(SCREEN_B + PLAYFIELD_BOTTOM_OFFSET)
-    sta ROW_PTR+1
+    SET_WORD ROW_PTR, (SCREEN_B + PLAYFIELD_BOTTOM_OFFSET)
     jmp generate_bottom_row
 
 ; EN: Toggle active_screen and select its matrix with one $d018 write.
@@ -538,13 +520,11 @@ flip_hidden_screen:
     sta active_screen
     beq @show_screen_a
 
-    lda #SCREEN_B_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_B_D018
     rts
 
 @show_screen_a:
-    lda #SCREEN_A_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_A_D018
     rts
 
 ; EN: Clear the hidden bottom row and optionally generate a random platform.
@@ -585,8 +565,7 @@ show_start_screen:
     jsr restore_modal_font_glyphs
     lda #0
     sta VIC_SPRITE_ENABLE
-    lda #SCREEN_A_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_A_D018
     lda #VIC_CONTROL_1_TEXT
     sta VIC_CONTROL_1
     jsr clear_screens_and_colors
@@ -594,8 +573,7 @@ show_start_screen:
     ldx #0
 @title:
     lda start_title, x
-    sta SCREEN_A+TITLE_OFFSET, x
-    sta SCREEN_B+TITLE_OFFSET, x
+    STORE_SCREEN_PAIR TITLE_OFFSET, x
     lda #COLOR_WHITE
     sta COLOR_RAM+TITLE_OFFSET, x
     inx
@@ -609,8 +587,7 @@ show_game_over_screen:
     jsr restore_modal_font_glyphs
     lda #0
     sta VIC_SPRITE_ENABLE
-    lda #SCREEN_A_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_A_D018
     lda #VIC_CONTROL_1_TEXT
     sta VIC_CONTROL_1
     jsr clear_screens_and_colors
@@ -618,8 +595,7 @@ show_game_over_screen:
     ldx #0
 @title:
     lda game_over_title, x
-    sta SCREEN_A+GAME_OVER_OFFSET, x
-    sta SCREEN_B+GAME_OVER_OFFSET, x
+    STORE_SCREEN_PAIR GAME_OVER_OFFSET, x
     lda #COLOR_RED
     sta COLOR_RAM+GAME_OVER_OFFSET, x
     inx
@@ -635,16 +611,13 @@ show_game_over_screen:
 show_game_over_player:
     ldy selected_character
     lda character_hurt_blocks, y
-    sta SPRITE_POINTER_A
-    sta SPRITE_POINTER_B
+    STORE_SPRITE_POINTER 0
 
     lda #GAME_OVER_PLAYER_X
     sta VIC_SPRITE_0_X
     lda #GAME_OVER_PLAYER_Y
     sta VIC_SPRITE_0_Y
-    lda VIC_SPRITE_X_HIGH
-    and #%11111110
-    sta VIC_SPRITE_X_HIGH
+    CLEAR_REGISTER_BITS VIC_SPRITE_X_HIGH, %00000001
 
     lda #0
     sta VIC_SPRITE_MULTICOLOR
@@ -663,8 +636,7 @@ draw_action_prompt:
     ldx #0
 @prompt:
     lda action_prompt, x
-    sta SCREEN_A+PROMPT_OFFSET, x
-    sta SCREEN_B+PROMPT_OFFSET, x
+    STORE_SCREEN_PAIR PROMPT_OFFSET, x
     lda #COLOR_WHITE
     sta COLOR_RAM+PROMPT_OFFSET, x
     inx
@@ -744,10 +716,8 @@ initialize_ui:
     ldx #0
 @horizontal:
     lda #CHAR_UI_FRAME
-    sta SCREEN_A+UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
-    sta SCREEN_B+UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
-    sta SCREEN_A+UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
-    sta SCREEN_B+UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
+    STORE_SCREEN_PAIR UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
+    STORE_SCREEN_PAIR UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
     lda #COLOR_CYAN
     sta COLOR_RAM+UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
     sta COLOR_RAM+UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
@@ -757,18 +727,9 @@ initialize_ui:
 
     ; 再逐行画左框、分隔条和右框。三个指针分别指向屏幕 A、屏幕 B 和
     ; Color RAM；先越过第 0 行，到达框线起始行 1。
-    lda #<SCREEN_A
-    sta ROW_PTR
-    lda #>SCREEN_A
-    sta ROW_PTR+1
-    lda #<SCREEN_B
-    sta DEST_PTR
-    lda #>SCREEN_B
-    sta DEST_PTR+1
-    lda #<COLOR_RAM
-    sta NEXT_ROW_PTR
-    lda #>COLOR_RAM
-    sta NEXT_ROW_PTR+1
+    SET_WORD ROW_PTR, SCREEN_A
+    SET_WORD DEST_PTR, SCREEN_B
+    SET_WORD NEXT_ROW_PTR, COLOR_RAM
     jsr advance_transition_pointers
 
     ldx #UI_FRAME_HEIGHT
@@ -801,8 +762,7 @@ initialize_ui:
     ldx #0
 @dial_row_1:
     lda dial_row_1, x
-    sta SCREEN_A+DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    sta SCREEN_B+DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
+    STORE_SCREEN_PAIR DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     lda #COLOR_WHITE
     sta COLOR_RAM+DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     inx
@@ -812,8 +772,7 @@ initialize_ui:
     ldx #0
 @dial_row_2:
     lda dial_row_2, x
-    sta SCREEN_A+(DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    sta SCREEN_B+(DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
+    STORE_SCREEN_PAIR (DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     lda #COLOR_WHITE
     sta COLOR_RAM+(DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     inx
@@ -823,8 +782,7 @@ initialize_ui:
     ldx #0
 @dial_row_3:
     lda dial_row_3, x
-    sta SCREEN_A+(DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    sta SCREEN_B+(DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
+    STORE_SCREEN_PAIR (DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     lda #COLOR_WHITE
     sta COLOR_RAM+(DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
     inx

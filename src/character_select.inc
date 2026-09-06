@@ -90,9 +90,7 @@ initialize_character_choices:
     sta VIC_SPRITE_PRIORITY
 
     ; 三个 X 坐标均小于 256，因此清 sprite 0..2 的三个高位；其他位不改。
-    lda VIC_SPRITE_X_HIGH
-    and #%11111000
-    sta VIC_SPRITE_X_HIGH
+    CLEAR_REGISTER_BITS VIC_SPRITE_X_HIGH, %00000111
 
     lda #CHARACTER_SELECT_LEFT_X
     sta VIC_SPRITE_0_X
@@ -108,8 +106,7 @@ initialize_character_choices:
     ldx #0
 @pointers:
     lda character_normal_blocks, x
-    sta SPRITE_POINTER_A, x
-    sta SPRITE_POINTER_B, x
+    STORE_SPRITE_POINTER 0, x
     inx
     cpx #PLAYER_CHARACTER_COUNT
     bne @pointers
@@ -159,9 +156,7 @@ initialize_centering_preview:
     sta VIC_SPRITE_0_X
     lda #CHARACTER_SELECT_Y
     sta VIC_SPRITE_0_Y
-    lda VIC_SPRITE_X_HIGH
-    and #%11111110
-    sta VIC_SPRITE_X_HIGH
+    CLEAR_REGISTER_BITS VIC_SPRITE_X_HIGH, %00000001
     ldy selected_character
     lda character_color_table, y
     sta VIC_SPRITE_0_COLOR
@@ -189,16 +184,14 @@ render_centering_direction:
 @right:
     lda character_right_blocks, y
 @store:
-    sta SPRITE_POINTER_A
-    sta SPRITE_POINTER_B
+    STORE_SPRITE_POINTER 0
     rts
 
 ; EN: Replace the direction frame with the selected hurt frame after bad Fire.
 render_centering_hurt:
     ldy selected_character
     lda character_hurt_blocks, y
-    sta SPRITE_POINTER_A
-    sta SPRITE_POINTER_B
+    STORE_SPRITE_POINTER 0
     rts
 
 ; EN: Install four modal-only letters and draw the 35-character neutral prompt.
@@ -216,8 +209,7 @@ draw_centering_prompt:
     ldx #SCREEN_COLUMNS-1
 @clear_row:
     lda #CHAR_BLANK
-    sta SCREEN_A+CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
-    sta SCREEN_B+CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
+    STORE_SCREEN_PAIR CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
     lda #COLOR_BLACK
     sta COLOR_RAM+CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
     dex
@@ -226,8 +218,7 @@ draw_centering_prompt:
     ldx #0
 @draw:
     lda centering_prompt, x
-    sta SCREEN_A+CENTERING_PROMPT_OFFSET, x
-    sta SCREEN_B+CENTERING_PROMPT_OFFSET, x
+    STORE_SCREEN_PAIR CENTERING_PROMPT_OFFSET, x
     lda #COLOR_WHITE
     sta COLOR_RAM+CENTERING_PROMPT_OFFSET, x
     inx

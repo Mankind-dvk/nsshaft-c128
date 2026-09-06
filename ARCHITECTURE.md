@@ -18,6 +18,7 @@ the same generated machine code while making ownership and call flow explicit.
 | --- | --- |
 | `src/main.s` | BASIC loader, C128/VIC-IIe bootstrap, new-game setup, frame loop, game-over transition |
 | `src/constants.inc` | Hardware addresses, memory layout, screen codes, sprite slots, tuning constants |
+| `src/macros.inc` | Short inline operations with explicit register/flag contracts; no runtime state |
 | `src/video.inc` | Double buffering, pixel-scroll glyph transitions, modal screens, UI character layout |
 | `src/platforms.inc` | PRNG seeding, platform type/width/position generation, platform drawing |
 | `src/input.inc` | Paddle port setup and POTX sampling |
@@ -32,6 +33,25 @@ the same generated machine code while making ownership and call flow explicit.
 | `src/music.inc` | PAL raster IRQ, three SID voices, instruments, frequency and pattern tables |
 | `src/assets.inc` | Custom charset, sprite bitmaps, pointer templates, text and lookup tables |
 | `src/state.inc` | Mutable state bytes grouped in one visible RAM layout |
+
+## Macro layer
+
+`main.s` includes `constants.inc` then `macros.inc` before executable modules.
+Uppercase macro calls expand inline; lowercase routines still use `jsr`/`jmp`.
+The seven helpers cover immediate word stores, D018 selection, paired screen
+writes, paired sprite-pointer writes, register-bit updates and raster IRQ ACK.
+They replace existing instruction sequences, not existing subroutine calls.
+Consequently this refactor preserves the PRG bytes, addresses and cycle counts.
+
+`STORE_SCREEN_PAIR` and `STORE_SPRITE_POINTER` consume A and preserve all CPU
+registers and flags; the other helpers overwrite A and N/Z. Optional X/Y indices
+are runtime inputs, whereas addresses, masks and offsets are compile-time inputs.
+Color RAM writes, `active_screen`, MMU mapping and interrupt masking remain the
+caller's responsibility. Read/modify/write helpers must not be used for IRQ
+status registers or D011. The music IRQ still returns through the C128 KERNAL;
+there is deliberately no PUSH/POP wrapper or replacement RTI sequence.
+
+See section 21 of both beginner guides for expansion examples and debugging.
 
 ## Runtime call flow
 

@@ -29,8 +29,7 @@ initialize_player:
     ; 输出：配置硬件 sprite 0，并把玩家水平居中放到第 22 行出生平台。
     ldy selected_character
     lda character_normal_blocks, y
-    sta SPRITE_POINTER_A
-    sta SPRITE_POINTER_B
+    STORE_SPRITE_POINTER 0
 
     lda #0
     sta VIC_SPRITE_MULTICOLOR
@@ -90,8 +89,7 @@ update_player_sprite_frame:
 @right:
     lda character_right_blocks, y
 @store:
-    sta SPRITE_POINTER_A
-    sta SPRITE_POINTER_B
+    STORE_SPRITE_POINTER 0
     rts
 
 ; 将玩家放置到 spawn_row 中由 platform_start/platform_width 指定的平台上。

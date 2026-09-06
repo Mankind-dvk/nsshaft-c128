@@ -20,6 +20,8 @@
 
 ```text
 main.s
+  -> constants.inc
+  -> macros.inc
   -> video.inc
   -> platforms.inc
   -> input.inc
@@ -533,3 +535,76 @@ IRQ 流程：
 
 练习时一次只改一个常量，并保留构建前后的 PRG。若行为异常，先恢复该变量，
 不要同时改动滚动、碰撞和内存布局。
+
+## 21. 如何阅读宏（Macro）
+
+`macros.inc` 不是新的游戏子系统，而是汇编期工具层。宏名使用大写，
+子程序仍使用小写：看到 `SET_WORD` 就去看宏展开，看到 `jsr update_player_vertical`
+就去看被调用的子程序。不要写 `jsr SET_WORD`。
+
+例如：
+
+```asm
+SET_WORD ROW_PTR, SCREEN_A
+```
+
+汇编时原地展开为：
+
+```asm
+lda #<SCREEN_A
+sta ROW_PTR
+lda #>SCREEN_A
+sta ROW_PTR+1
+```
+
+`SCREEN_A` 是编译期地址，不是从该地址读取数据。低字节先写，高字节后写；
+执行完 A 留下高字节，N/Z 也会变化，X/Y 与进位 C 不变。写 IRQ 向量时仍要由
+调用者显式 `sei`，因为两次写入不是原子的。宏不会偷偷保存寄存器或关中断。
+
+### 本项目的七个宏
+
+| 宏 | 用途 | 寄存器与标志副作用 |
+| --- | --- | --- |
+| `SET_WORD destination, value` | 装载16位常量/地址 | 修改 A、N/Z |
+| `SHOW_SCREEN layout` | 写完整 D018 布局 | 修改 A、N/Z；不更新 active_screen |
+| `STORE_SCREEN_PAIR offset [, x/y]` | 把 A 写入两屏相同偏移 | 寄存器和标志全部不变 |
+| `STORE_SPRITE_POINTER slot [, x/y]` | 把 A 写入两屏 Sprite 指针表 | 寄存器和标志全部不变 |
+| `SET_REGISTER_BITS target, bits` | 读回后置位指定位 | 修改 A、N/Z |
+| `CLEAR_REGISTER_BITS target, bits` | 读回后清除指定位 | 修改 A、N/Z |
+| `ACK_VIC_RASTER_IRQ` | 向 D019 写1确认光栅中断 | A=1，N=0，Z=0 |
+
+表格中的方括号表示可选参数，不需要真的输入方括号。例如：
+
+```asm
+lda #CHAR_P
+STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET
+
+lda potx_label, x
+STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET, x
+
+lda #PADDLE_POINTER_BLOCK
+STORE_SPRITE_POINTER 4
+```
+
+双屏写入不会修改 Color RAM；它只有一份，仍在调用处单独写。Sprite 宏中的
+A 是64字节块编号而非图像地址，固定槽号必须为0..7；使用索引时还必须保证
+运行期的槽号加索引不超过7。`SHOW_SCREEN` 也不会选择新的16KB VIC bank。
+
+### 为什么不把所有代码都换成宏
+
+- 宏每调用一次都复制一次机器码；本次替换的是原本就内联的指令，所以没有增大程序。
+- 碰撞、计分、HP、随机平台、音乐播放仍由子程序负责，主循环调度次序没有改变。
+- `CLEAR_REGISTER_BITS` 接收要清除的位：清 bit 0 应传 `%00000001`，不是 `%11111110`。
+- 通用位操作不能用于 D019、CIA 中断状态等有副作用的寄存器；D011 读写高位语义
+  不同，也保留显式代码。不要为了统一外观而隐藏硬件特殊性。
+- C128 KERNAL 已经为当前 IRQ 入口保存寄存器和 MMU。本项目不添加 `PUSH_AXY` /
+  `POP_AXY`，也不把末尾的 KERNAL 返回跳转改成 `rti`。
+
+### 如何调试
+
+先阅读宏定义的输入、输出和副作用，再查看 `build/nsshaft-c128.lst` 中的展开
+机器码；VICE 仍然执行真实的 LDA/STA 等指令，不认识宏名。定义里的 `.ifblank`
+和 `.assert` 都在汇编期处理，不是 CPU 运行时分支。
+
+本次重构要求重构前后的 PRG 逐字节相同，而不仅是编译成功。这样可以确认没有
+改变指令、地址、分支距离和执行周期；宏化提升的是源码可读性，不是游戏速度。

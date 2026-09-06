@@ -80,10 +80,7 @@ initialize_music:
     ; C128 KERNAL 通过 $0314/$0315 分派 IRQ。硬件入口已经保存 A/X/Y 和
     ; MMU 配置，因此本处理器不能再调用原 KERNAL IRQ 服务，否则它会把
     ; VIC-IIe 光栅 IRQ 当成系统显示中断继续处理，造成 sprite 闪烁。
-    lda #<music_raster_irq
-    sta KERNAL_IRQ_VECTOR
-    lda #>music_raster_irq
-    sta KERNAL_IRQ_VECTOR+1
+    SET_WORD KERNAL_IRQ_VECTOR, music_raster_irq
     ; 不要与 wait_for_frame 使用同一条光栅线，否则 IRQ 返回时主循环可能
     ; 已错过同步点，并无谓地再等待一帧。
     lda #MUSIC_IRQ_RASTER
@@ -91,8 +88,7 @@ initialize_music:
     lda VIC_CONTROL_1
     and #%01111111
     sta VIC_CONTROL_1
-    lda #1
-    sta VIC_IRQ_STATUS
+    ACK_VIC_RASTER_IRQ
     sta VIC_IRQ_ENABLE
     cli
     rts
@@ -101,8 +97,7 @@ initialize_music:
 music_raster_irq:
     ; C128 KERNAL 的硬件入口已经压栈保存寄存器；本例程先向 $d019 写 1 确认
     ; 光栅 IRQ，再播放一帧，最后跳到 $ff33 统一恢复，而不是执行普通 RTS。
-    lda #1
-    sta VIC_IRQ_STATUS
+    ACK_VIC_RASTER_IRQ
     jsr play_music_frame
     jmp KERNAL_IRQ_RETURN
 
@@ -167,8 +162,7 @@ stop_music:
     sta SID_VOLUME
     sta music_gate_timer
     sta music_voice3_delay
-    lda #1
-    sta VIC_IRQ_STATUS
+    ACK_VIC_RASTER_IRQ
     rts
 
 ; 同一个步骤同时触发旋律和低音。鼓点只占用声道 3 的前两帧，随后恢复

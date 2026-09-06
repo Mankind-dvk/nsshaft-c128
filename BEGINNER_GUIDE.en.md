@@ -22,6 +22,8 @@ The project uses a single translation unit assembled from several include files:
 
 ```text
 main.s
+  -> constants.inc
+  -> macros.inc
   -> video.inc
   -> platforms.inc
   -> input.inc
@@ -592,3 +594,82 @@ Common problems:
 Change one constant at a time and keep the previous PRG. If behavior breaks,
 restore that change before modifying scrolling, collision, or memory layout at
 the same time.
+
+## 21. Reading macros
+
+`macros.inc` is a compile-time helper layer, not a gameplay subsystem. Uppercase
+names expand inline; lowercase routines are called using `jsr`/`jmp`. Do not
+write `jsr SET_WORD`.
+
+```asm
+SET_WORD ROW_PTR, SCREEN_A
+```
+
+expands at the call site to:
+
+```asm
+lda #<SCREEN_A
+sta ROW_PTR
+lda #>SCREEN_A
+sta ROW_PTR+1
+```
+
+SCREEN_A is an immediate address, not a memory value to read. The low byte is
+stored first. A ends with the high byte; N/Z change while X/Y and carry remain
+unchanged. This two-byte store is not atomic: IRQ-vector callers still use an
+explicit `sei`. Macros do not silently preserve registers or mask interrupts.
+
+### The seven helpers
+
+| Macro | Purpose | Clobbers |
+| --- | --- | --- |
+| `SET_WORD destination, value` | Store an immediate 16-bit value/address | A, N/Z |
+| `SHOW_SCREEN layout` | Write the complete D018 layout | A, N/Z; not active_screen |
+| `STORE_SCREEN_PAIR offset [, x/y]` | Store A at the same offset in both matrices | None |
+| `STORE_SPRITE_POINTER slot [, x/y]` | Store A in both sprite-pointer tables | None |
+| `SET_REGISTER_BITS target, bits` | Read back and set selected bits | A, N/Z |
+| `CLEAR_REGISTER_BITS target, bits` | Read back and clear selected bits | A, N/Z |
+| `ACK_VIC_RASTER_IRQ` | Write 1 to D019 to acknowledge raster IRQ | A=1, N=0, Z=0 |
+
+Brackets mean an optional parameter; do not type the brackets:
+
+```asm
+lda #CHAR_P
+STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET
+
+lda potx_label, x
+STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET, x
+
+lda #PADDLE_POINTER_BLOCK
+STORE_SPRITE_POINTER 4
+```
+
+Paired screen writes do not update Color RAM, which has only one copy. Sprite
+pointers consume a 64-byte block number, not a bitmap address. Fixed slots must
+be 0..7; callers using an index must also bound slot + index to 0..7 at runtime.
+SHOW_SCREEN does not change the 16 KB VIC bank or the active_screen variable.
+
+### Why gameplay remains in subroutines
+
+- Every macro call emits another instruction sequence. This refactor replaces
+  already-inline sequences, so it does not grow the executable.
+- Collision, scoring, HP, random generation and music remain subroutines. The
+  main-loop order is unchanged.
+- CLEAR_REGISTER_BITS takes bits to clear: `%00000001` clears bit 0, not
+  `%11111110` (the old AND keep-mask).
+- Generic read/modify/write is unsafe for D019, CIA interrupt status and other
+  side-effect registers. D011 also has different read/write high-bit meanings;
+  its existing explicit sequence is deliberately retained.
+- The current C128 KERNAL IRQ entry already saves registers and MMU state. No
+  PUSH_AXY/POP_AXY wrapper is added, and the KERNAL return jump is not replaced
+  with RTI.
+
+### Debugging and verification
+
+Read each macro's input/output/clobber contract, then inspect the expanded bytes
+in `build/nsshaft-c128.lst`. VICE executes real LDA/STA instructions, not macro
+names. `.ifblank` and `.assert` are assembly-time directives, not CPU branches.
+
+This refactor requires a byte-for-byte identical PRG, not just a successful
+build. That preserves instructions, addresses, branch distances and cycle
+counts. The improvement is source readability, not faster gameplay.

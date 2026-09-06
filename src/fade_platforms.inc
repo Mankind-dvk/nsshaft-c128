@@ -145,14 +145,8 @@ apply_fade_effect_to_buffers:
     ; 输入：fade_platform_row、fade_effect_mode、fade_color_prefix。
     ; 输出：同时修改 SCREEN_A/B。扫描 row-1,row,row+1 是因为转场期间一个
     ; 逻辑平台可能分成相邻两行，而两张屏幕还可能处于不同表示阶段。
-    lda #<SCREEN_A
-    sta ROW_PTR
-    lda #>SCREEN_A
-    sta ROW_PTR+1
-    lda #<SCREEN_B
-    sta DEST_PTR
-    lda #>SCREEN_B
-    sta DEST_PTR+1
+    SET_WORD ROW_PTR, SCREEN_A
+    SET_WORD DEST_PTR, SCREEN_B
 
     ldx fade_platform_row
     dex

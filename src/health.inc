@@ -30,14 +30,11 @@ initialize_health:
     sta health_ones
 
     lda #CHAR_H
-    sta SCREEN_A+HP_DISPLAY_OFFSET
-    sta SCREEN_B+HP_DISPLAY_OFFSET
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET
     lda #CHAR_P
-    sta SCREEN_A+HP_DISPLAY_OFFSET+1
-    sta SCREEN_B+HP_DISPLAY_OFFSET+1
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET+1
     lda #CHAR_COLON
-    sta SCREEN_A+HP_DISPLAY_OFFSET+2
-    sta SCREEN_B+HP_DISPLAY_OFFSET+2
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET+2
 
     lda #COLOR_WHITE
     ldx #0
@@ -151,18 +148,15 @@ update_health_display:
     lda health_hundreds
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+HP_DISPLAY_OFFSET+3
-    sta SCREEN_B+HP_DISPLAY_OFFSET+3
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET+3
     lda health_tens
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+HP_DISPLAY_OFFSET+4
-    sta SCREEN_B+HP_DISPLAY_OFFSET+4
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET+4
     lda health_ones
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+HP_DISPLAY_OFFSET+5
-    sta SCREEN_B+HP_DISPLAY_OFFSET+5
+    STORE_SCREEN_PAIR HP_DISPLAY_OFFSET+5
     rts
 
 .assert * <= PLAYER_HURT_ADDRESS, error, "HP code overlaps hurt sprite block"

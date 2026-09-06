@@ -24,18 +24,14 @@ initialize_paddles:
     ; 输出：CIA1 PA6/PA7 配置为端口选择输出，PB2..PB4 配置为按钮输入。
     ; OR 用来只置位目标 bit，AND 用来只清除目标 bit，其他 CIA 引脚保持原值。
     ; PA6/PA7 选择连接到 SID POT 输入的控制端口。
-    lda CIA1_DDR_A
-    ora #%11000000
-    sta CIA1_DDR_A
+    SET_REGISTER_BITS CIA1_DDR_A, %11000000
     lda CIA1_PORT_A
     and #%00111111
     ora #PADDLE_PORT_1_SELECT
     sta CIA1_PORT_A
 
     ; Paddle 按钮和摇杆 FIRE 都是 PB2..PB4 上的低电平有效输入。
-    lda CIA1_DDR_B
-    and #%11100011
-    sta CIA1_DDR_B
+    CLEAR_REGISTER_BITS CIA1_DDR_B, %00011100
     rts
 
 ; EN: Read one SID POTX sample into potx_raw; test builds may override it.

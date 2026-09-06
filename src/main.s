@@ -1,6 +1,7 @@
 .setcpu "6502"
 
 .include "constants.inc"
+.include "macros.inc"
 
 ; ---------------------------------------------------------------------------
 ; NS-SHAFT C128 程序入口与逐帧调度
@@ -62,20 +63,12 @@ start:
     ; 字符集和 sprite 之前，必须明确映射 RAM bank 0。
     lda #MMU_CONFIG_BANK0_IO
     sta MMU_CONFIG
-    lda VIC_CPU_SPEED
-    and #%11111110
-    sta VIC_CPU_SPEED
-    lda MMU_RAM_CONFIG
-    and #%10111111
-    sta MMU_RAM_CONFIG
+    CLEAR_REGISTER_BITS VIC_CPU_SPEED, %00000001
+    CLEAR_REGISTER_BITS MMU_RAM_CONFIG, %01000000
 
     ; 选择 RAM bank 0 中的第一个 16 KB VIC bank（$0000-$3fff）。
-    lda CIA2_DDR_A
-    ora #%00000011
-    sta CIA2_DDR_A
-    lda CIA2_PORT_A
-    ora #%00000011
-    sta CIA2_PORT_A
+    SET_REGISTER_BITS CIA2_DDR_A, %00000011
+    SET_REGISTER_BITS CIA2_PORT_A, %00000011
 
     ; 初始化期间先关闭全部 sprite，避免 BASIC 遗留寄存器显示随机图块。
     lda #0
@@ -88,8 +81,7 @@ start:
     sta VIC_CONTROL_2
     lda #VIC_CONTROL_1_TEXT
     sta VIC_CONTROL_1
-    lda #SCREEN_A_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_A_D018
 
     lda #COLOR_BLACK
     sta VIC_BACKGROUND_COLOR
@@ -130,8 +122,7 @@ new_game:
     sta fine_scroll
     lda #VIC_CONTROL_1_TEXT
     sta VIC_CONTROL_1
-    lda #SCREEN_A_D018
-    sta VIC_MEMORY_POINTERS
+    SHOW_SCREEN SCREEN_A_D018
 
     jsr clear_screens_and_colors
     jsr initialize_fade_platforms

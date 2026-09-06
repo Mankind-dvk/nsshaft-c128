@@ -30,8 +30,7 @@ initialize_hud:
     ldx #0
 @label:
     lda potx_label, x
-    sta SCREEN_A+POTX_DISPLAY_OFFSET, x
-    sta SCREEN_B+POTX_DISPLAY_OFFSET, x
+    STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET, x
     inx
     cpx #5
     bne @label
@@ -91,20 +90,17 @@ update_potx_display:
     lda potx_hundreds
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+POTX_DISPLAY_OFFSET+5
-    sta SCREEN_B+POTX_DISPLAY_OFFSET+5
+    STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET+5
 
     lda potx_tens
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+POTX_DISPLAY_OFFSET+6
-    sta SCREEN_B+POTX_DISPLAY_OFFSET+6
+    STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET+6
 
     lda potx_ones
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+POTX_DISPLAY_OFFSET+7
-    sta SCREEN_B+POTX_DISPLAY_OFFSET+7
+    STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET+7
     rts
 
 ; 固定 paddle 仪表盘 --------------------------------------------------------
@@ -114,8 +110,7 @@ initialize_dashboard:
     ; 输出：sprite 4 指向可写的 PADDLE_POINTER_ADDRESS，启用 X 两倍宽并设置
     ; 固定位置。$d010 的 bit 4 是 sprite 4 的第九个 X 位；bit 0 必须保留给玩家。
     lda #PADDLE_POINTER_BLOCK
-    sta SPRITE_POINTER_A+4
-    sta SPRITE_POINTER_B+4
+    STORE_SPRITE_POINTER 4
 
     ; 只有红色表针使用 sprite；白色半圆表盘由状态栏中的固定自定义字符组成。
     lda #PADDLE_POINTER_X_LOW
@@ -139,9 +134,7 @@ initialize_dashboard:
     sta dashboard_pointer_state
     jsr update_dashboard_pointer
 
-    lda VIC_SPRITE_ENABLE
-    ora #%00010000
-    sta VIC_SPRITE_ENABLE
+    SET_REGISTER_BITS VIC_SPRITE_ENABLE, %00010000
     rts
 
 ; 中央继续使用玩家控制的 108..148 死区；两侧再各分出一个最大斜角，得到

@@ -158,14 +158,8 @@ advance_spring_platform_scroll_position:
 apply_spring_effect_to_buffers:
     ; 输入：spring_platform_row、spring_effect_mode。输出：同步修改 A/B 两屏
     ; 锚点附近三行。紫色 Color RAM 不需要改，因为压缩前后都使用同一颜色。
-    lda #<SCREEN_A
-    sta ROW_PTR
-    lda #>SCREEN_A
-    sta ROW_PTR+1
-    lda #<SCREEN_B
-    sta DEST_PTR
-    lda #>SCREEN_B
-    sta DEST_PTR+1
+    SET_WORD ROW_PTR, SCREEN_A
+    SET_WORD DEST_PTR, SCREEN_B
 
     ldx spring_platform_row
     dex

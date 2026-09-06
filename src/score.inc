@@ -46,11 +46,9 @@ initialize_score:
     sta music_tempo_increment
 
     lda #CHAR_P
-    sta SCREEN_A+SCORE_DISPLAY_OFFSET
-    sta SCREEN_B+SCORE_DISPLAY_OFFSET
+    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET
     lda #CHAR_COLON
-    sta SCREEN_A+SCORE_DISPLAY_OFFSET+1
-    sta SCREEN_B+SCORE_DISPLAY_OFFSET+1
+    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET+1
 
     lda #COLOR_WHITE
     ldx #0
@@ -174,8 +172,7 @@ render_score_digits:
     lda score_digits, x
     clc
     adc #CHAR_DIGIT_0
-    sta SCREEN_A+SCORE_DISPLAY_OFFSET+2, x
-    sta SCREEN_B+SCORE_DISPLAY_OFFSET+2, x
+    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET+2, x
     inx
     cpx #SCORE_DIGIT_COUNT
     bne @digit

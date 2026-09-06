@@ -5,6 +5,10 @@ from a BASIC 7 program at `$1c01` (`SYS 7424`), runs entirely in C128 mode, and
 does not enter C64 compatibility mode. The program forces 1 MHz operation,
 maps the 8502 and VIC-IIe to RAM bank 0, and uses the 40-column display.
 
+Short repeated assembly operations live in `src/macros.inc`; gameplay remains
+in subsystem subroutines. See `ARCHITECTURE.md` and section 21 of both beginner
+guides for macro contracts, expansion examples and byte-identical verification.
+
 The game implements the core NS-Shaft descent loop. Platforms are custom
 character tiles and move upward one pixel at a time. A player standing on a
 platform is carried upward with it; walking beyond an edge starts a
