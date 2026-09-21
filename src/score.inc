@@ -5,7 +5,7 @@
 ; 计分状态，状态与粗滚动同步上移；第一次接触将 claimed 位设为 1，之后
 ; 无论弹簧重落、走开再回来或平台继续上移，都不会再次得分。
 ;
-; 右栏只有八个字符宽，因此显示为 P:000000。六位数字分别保存为 0..9 的
+; 右栏只有八个字符宽，因此分两行显示 SCORE: 和 000000。六位数字分别保存为 0..9 的
 ; 独立字节；加分、显示和比较都不需要 6502 不擅长的除法，也不需要 SED，
 ; 从而不会让异步 SID IRQ 意外继承十进制标志。
 ;
@@ -16,7 +16,7 @@
 ;
 ; English summary:
 ;   Score counts first contacts with distinct platform rows, including spikes,
-;   and is displayed as P:000000. Per-row claimed flags survive scrolling and
+;   and is displayed below SCORE:. Per-row claimed flags survive scrolling and
 ;   prevent duplicate awards. Scroll speed and SID tempo rise together at
 ;   20/40/60/80 points.
 
@@ -24,7 +24,7 @@
 
 ; EN: Clear score, draw its fixed label, and restore base scroll/music rates.
 initialize_score:
-    ; 输出：score=000000，清空平台领取状态，右栏显示 P:000000，并让滚动与
+    ; 输出：score=000000，清空平台领取状态，右栏分两行显示 SCORE: 和数字，并让滚动与
     ; SID 音乐都恢复基础速度。
     lda #0
     sta scroll_accumulator
@@ -45,18 +45,16 @@ initialize_score:
     lda #MUSIC_TEMPO_LEVEL_0
     sta music_tempo_increment
 
-    lda #CHAR_P
-    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET
-    lda #CHAR_COLON
-    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET+1
-
-    lda #COLOR_WHITE
     ldx #0
-@color:
+@label:
+    lda score_label, x
+    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET, x
+    lda #COLOR_WHITE
     sta COLOR_RAM+SCORE_DISPLAY_OFFSET, x
+    sta COLOR_RAM+SCORE_DIGITS_OFFSET, x
     inx
-    cpx #2+SCORE_DIGIT_COUNT
-    bne @color
+    cpx #SCORE_DIGIT_COUNT
+    bne @label
     jmp render_score_digits
 
 ; EN: Return C=1 when the phase accumulator schedules a one-pixel world step.
@@ -76,7 +74,7 @@ scroll_step_ready:
 
 ; EN: Award a point only if collision_row names an unclaimed platform row.
 award_platform_landing_score:
-    ; collision_row 是绝对屏幕行；减去 PLAYFIELD_TOP_ROW 得到 0..20 的游戏区
+    ; collision_row 是绝对屏幕行；减去 PLAYFIELD_TOP_ROW 得到 0..19 的游戏区
     ; 索引。空行、越界行和已经领取的平台都直接返回。
     lda collision_row
     sec
@@ -97,7 +95,7 @@ award_platform_landing_score:
 
 ; EN: Move platform claim flags upward with each completed character-row scroll.
 advance_platform_score_rows:
-    ; 元素 1..20 复制到 0..19，最后一行清零。generate_bottom_row 若实际生成
+    ; 元素 1..19 复制到 0..18，最后一行清零。generate_bottom_row 若实际生成
     ; 平台，会随后把最后一行改成 PLATFORM_SCORE_UNCLAIMED。
     ldx #0
 @shift:
@@ -172,11 +170,15 @@ render_score_digits:
     lda score_digits, x
     clc
     adc #CHAR_DIGIT_0
-    STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET+2, x
+    STORE_SCREEN_PAIR SCORE_DIGITS_OFFSET, x
     inx
     cpx #SCORE_DIGIT_COUNT
     bne @digit
     rts
+
+score_label:
+    .byte CHAR_S, CHAR_C, CHAR_O, CHAR_R, CHAR_E, CHAR_COLON
+.assert *-score_label = SCORE_DIGIT_COUNT, error, "Score label/color span mismatch"
 
 scroll_rate_table:
     .byte SCROLL_RATE_LEVEL_0, SCROLL_RATE_LEVEL_1, SCROLL_RATE_LEVEL_2

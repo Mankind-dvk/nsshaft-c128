@@ -194,21 +194,15 @@ render_centering_hurt:
     STORE_SPRITE_POINTER 0
     rts
 
-; EN: Install four modal-only letters and draw the 35-character neutral prompt.
+; EN: Draw the 35-character neutral prompt; modal entry already installed its font.
 draw_centering_prompt:
-    ; W/C/Y/U 暂用连续的 31..34 号过渡字形。游戏尚未开始，覆盖它们不会
-    ; 影响平台；后续滚动转场会按正常流程重新生成相同槽位。
-    ldx #CENTERING_PROMPT_GLYPH_BYTES-1
-@install_glyphs:
-    lda centering_prompt_glyphs, x
-    sta normal_upper_glyph, x
-    dex
-    bpl @install_glyphs
+    ; show_start_screen 已装入第二源库的完整基础文字页；这里仅写屏幕码。
+    ; EN: The title entry imports the complete text page once.
 
     ; 先清除旧的十字符 PRESS FIRE，再写居中的 35 字符完整说明。
     ldx #SCREEN_COLUMNS-1
 @clear_row:
-    lda #CHAR_BLANK
+    lda #TEXT_SPACE
     STORE_SCREEN_PAIR CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
     lda #COLOR_BLACK
     sta COLOR_RAM+CENTERING_PROMPT_ROW*SCREEN_COLUMNS, x
@@ -256,24 +250,15 @@ character_color_table:
 
 ; "PRESS FIRE WHEN CHARACTER FACES YOU"，正好 35 个屏幕码。
 centering_prompt:
-    .byte CHAR_P, CHAR_R, CHAR_E, CHAR_S, CHAR_S, CHAR_BLANK
-    .byte CHAR_F, CHAR_I, CHAR_R, CHAR_E, CHAR_BLANK
-    .byte CHAR_W, CHAR_H, CHAR_E, CHAR_N, CHAR_BLANK
-    .byte CHAR_C, CHAR_H, CHAR_A, CHAR_R, CHAR_A, CHAR_C, CHAR_T, CHAR_E, CHAR_R
-    .byte CHAR_BLANK, CHAR_F, CHAR_A, CHAR_C, CHAR_E, CHAR_S, CHAR_BLANK
-    .byte CHAR_Y, CHAR_O, CHAR_U
+    .byte TEXT_P, TEXT_R, TEXT_E, TEXT_S, TEXT_S, TEXT_SPACE
+    .byte TEXT_F, TEXT_I, TEXT_R, TEXT_E, TEXT_SPACE
+    .byte TEXT_W, TEXT_H, TEXT_E, TEXT_N, TEXT_SPACE
+    .byte TEXT_C, TEXT_H, TEXT_A, TEXT_R, TEXT_A, TEXT_C, TEXT_T, TEXT_E, TEXT_R
+    .byte TEXT_SPACE, TEXT_F, TEXT_A, TEXT_C, TEXT_E, TEXT_S, TEXT_SPACE
+    .byte TEXT_Y, TEXT_O, TEXT_U
 centering_prompt_end:
 .assert centering_prompt_end-centering_prompt = CENTERING_PROMPT_LENGTH, error, "centering prompt length mismatch"
 
-; 与项目其余 8x8 字体同风格的 W/C/Y/U，依次复制到字形 31..34。
-centering_prompt_glyphs:
-    .byte $63,$63,$63,$6b,$7f,$77,$63,$00 ; W
-    .byte $3c,$66,$60,$60,$60,$66,$3c,$00 ; C
-    .byte $66,$66,$66,$3c,$18,$18,$18,$00 ; Y
-    .byte $66,$66,$66,$66,$66,$66,$3c,$00 ; U
-centering_prompt_glyphs_end:
-CENTERING_PROMPT_GLYPH_BYTES = centering_prompt_glyphs_end-centering_prompt_glyphs
-.assert CENTERING_PROMPT_GLYPH_BYTES = 32, error, "centering prompt glyph size mismatch"
 character_select_code_end:
 
 .assert character_select_code_end <= $4000, error, "character select code exceeds VIC bank 0"

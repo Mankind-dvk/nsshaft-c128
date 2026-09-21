@@ -6,7 +6,7 @@
 ; 锯齿波琶音和噪声鼓之间切换。它不是播放 MP3 采样，而是根据原曲节奏、
 ; 调性和段落重新构造的硬件 SID 编曲。
 ;
-; 播放器位于 $2a00，处在字符集末尾与 sprite 数据之间。VIC-IIe 在主循环
+; 播放器位于 $2a10，处在字符集末尾与 sprite 数据之间。VIC-IIe 在主循环
 ; 帧同步线之前每个 PAL 帧调用一次 play_music_frame。基础档 44/512 与旧版
 ; 22/256 相同，约为 129 BPM；20/40/60/80 分时和滚动一起提升到
 ; 1.25/1.5/1.75/2 倍。IRQ 不使用零页，只改音乐状态并完整保存 A/X/Y，
@@ -149,7 +149,7 @@ play_music_frame:
     sta music_tempo_accumulator_high
     rts
 
-; EN: Disable the raster source, restore the default IRQ vector, and silence SID.
+; EN: Disable IRQs and the raster source, silence SID; keep the installed vector.
 stop_music:
     ; 关闭 IRQ 和三个 GATE，并把总音量设为 0。保持 SEI，后续 new_game 的
     ; initialize_music 会重新安装 IRQ 并执行 CLI。
@@ -367,4 +367,4 @@ music_drum_pattern:
 .assert music_arp_pattern - music_bass_pattern = 128, error, "music bass pattern must contain 128 steps"
 .assert music_drum_pattern - music_arp_pattern = 128, error, "music arp pattern must contain 128 steps"
 .assert * - music_drum_pattern = 8, error, "music drum pattern must contain 8 steps"
-.assert * <= $3000, error, "music segment overlaps sprite data"
+.assert * <= $2e00, error, "music segment overlaps platform effects"

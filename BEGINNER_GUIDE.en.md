@@ -25,7 +25,9 @@ main.s
   -> constants.inc
   -> macros.inc
   -> video.inc
+  -> platform_materials.inc
   -> platforms.inc
+  -> platform_rows.inc
   -> input.inc
   -> hud.inc
   -> score.inc
@@ -65,11 +67,14 @@ project in this order:
    shared character frame lookup tables.
 6. `src/platforms.inc`: PRNG use, address tables, and `(pointer),Y` screen writes.
 7. `src/player.inc`: 9-bit coordinates, fixed-point speed, and collision states.
-8. `src/video.inc`: double buffering and custom-character pixel scrolling.
+8. `src/video.inc` and `src/platform_rows.inc`: double buffering, descriptor-based
+   hidden-screen rendering, and custom-character pixel scrolling.
 9. `src/fade_platforms.inc`, `src/spring_platforms.inc`, and
    `src/conveyor_platforms.inc`: platform lifecycles and runtime glyph reuse.
 10. `src/music.inc`: raster IRQ handling and SID playback.
-11. `src/assets.inc`: binary glyph and sprite data when graphics need editing.
+11. `src/charset_ids.inc` / `src/charset_loader.inc`: glyph IDs and two-source
+    composition. `graphics_charset.inc` owns graphics; `text_charset.inc` imports
+    text. See [CHARSET_LAYOUT.md](CHARSET_LAYOUT.md). Sprites remain in `src/assets.inc`.
 
 ## 3. ca65 and 6502 syntax quick reference
 
@@ -160,16 +165,19 @@ Decimal 7424 is hexadecimal `$1d00`, the address of `start`.
 | `$0400-$07ff` | Screen buffer A and its sprite pointer table |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointer table |
 | `$1c01-$1c0c` | BASIC 7 loader line |
-| `$1d00-$27e4` | Main loop, video, HUD, scoring, platform drawing, and state |
-| `$2800-$29ff` | 64-character custom character set |
-| `$2a00-$2dc2` | SID player and arrangement data |
-| `$2e00-$2f37` | Disappearing-platform effect code |
+| `$1d00-$27d5` | Main loop, video, HUD, scoring, platform descriptions/rendering and state |
+| `$2800-$2a0f` | 66-character custom character set |
+| `$2a10-$2dd2` | SID player and arrangement data |
+| `$2e00-$2f2c` | Disappearing-platform effect code |
 | `$3000-$30ff` | Four player sprite frames |
 | `$3100-$313f` | Writable dial-hand sprite |
-| `$3140-$37d4` | Player physics, spring, and conveyor code |
-| `$3800-$39ed` | Weighted platform generation, HP display, and hazard recovery |
+| `$3140-$3779` | Player physics, ceiling recovery and spring/conveyor code |
+| `$3800-$39da` | Ceiling drawing, weighted generation, HP display and spike recovery |
 | `$3a00-$3cbf` | Elien hurt plus all five Ember and five Wasser frames |
-| `$3cc0-$3e8f` | Character-selection code, prompt glyphs, and frame/color tables |
+| `$3cc0-$3e64` | Character-selection code, prompt text, and frame/color tables |
+| `$4000-$47ff` | Source charset 1: custom graphics only, 2 KB |
+| `$4800-$4fff` | Source charset 2: teacher's uppercase font, 2 KB |
+| `$5000-$5358` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
 | `$d800-$dbff` | Color RAM |
 
 These fixed addresses are not arbitrary. VIC-IIe character sets and sprite
@@ -200,17 +208,20 @@ cannot silently overwrite graphics data.
 `new_game` runs at the beginning of every round:
 
 1. Disable sprites and reset screen-flip and game-over state.
-2. Clear both screen matrices and Color RAM.
-3. Reset fade and spring state, then install runtime conveyor glyphs.
+2. Blank the display and compose game glyphs; clear both matrices, Color RAM
+   and platform descriptions.
+3. Reset fade and spring state, then reset conveyor patterns/counter and install
+   their runtime glyphs.
 4. Seed the PRNG, clear score/claim state, and create five initial platforms.
 5. Draw the fixed UI and score, then initialize the POTX display and dial.
 6. Place the player on the lowest safe platform.
 7. Initialize SID music.
-8. Copy the complete screen A image into screen B.
+8. Copy the complete screen A image into screen B and enable the display.
 
 ### 6.3 `main_loop`
 
-The call order is fixed for every PAL frame:
+The loop targets one update per PAL frame in this fixed order. If work misses
+the synchronization line, it waits for a later frame without catch-up updates:
 
 ```text
 wait for the frame boundary
@@ -221,6 +232,7 @@ wait for the frame boundary
   -> add one point on the first landing on an unclaimed platform
   -> update disappearing-platform timers
   -> update spring timers
+  -> update left/right conveyor texture animation
   -> select the player sprite frame
   -> test game over
   -> accumulate scroll phase; on carry, move one pixel
@@ -230,7 +242,7 @@ Platform scrolling occurs after physics deliberately. The player first resolves
 collision against the current screen, then the platform world and any supported
 player move upward together by one pixel.
 
-## 7. Screen matrices, Color RAM, and ECM
+## 7. Screen matrices, Color RAM, and mixed character modes
 
 A 40-column text screen contains 40x25=1000 screen codes. The address of a cell is:
 
@@ -238,18 +250,25 @@ A 40-column text screen contains 40x25=1000 screen codes. The address of a cell 
 screen_address = screen_base + row * 40 + column
 ```
 
-Extended Color Mode splits each screen code as follows:
+ECM is now disabled. Screen codes select glyphs directly; Color RAM selects each cell's mode:
 
 ```text
-bits 7..6: select $d021/$d022/$d023/$d024
-bits 5..0: select glyph 0..63
+Color RAM bit 3=0: 8x8 hires, one bit per pixel
+Color RAM bit 3=1: 4x8 multicolor, two bits per wide pixel
+Multicolor pairs: 00 black, 01 white, 10 gray, 11 local low-three-bit color
 ```
 
-The project can therefore address only 64 custom glyphs. White normal platforms,
-red spikes, and gray disappearing platforms use ECM background colors. Purple
-springs and green conveyors use Color RAM foreground colors instead. A conveyor
-clears glyph bits at the arrow pixels so that the black background shows through
-the green block as a cut-out symbol.
+Normal brick platforms and the frame use Color RAM=10 (multicolor plus red).
+Red bricks, white mortar and black blank rows coexist in scrolling fragments.
+The eight source rows split into UPPER/LOWER without changing their order, so
+vertical motion is still one pixel per step. Disappearing platforms use separate
+red-brick/gray-mortar glyphs for their three crumbling stages. Conveyors use
+Color RAM=14, with white/blue pairs 01/11 and black 00 in empty fragment rows.
+Spikes use white/green multicolor; text, dial and springs retain hires detail.
+
+Hardware supports 256 glyph indices, but the output reserves only 528 bytes,
+so this build uses indices 0..65. This is a memory-layout limit, not an
+ECM limit; SCORE adds four letters at 62..65, with music moved to $2a10.
 
 ## 8. Why the renderer is double-buffered
 
@@ -257,12 +276,14 @@ If code edits the visible screen one character at a time, the player can see a
 partly old and partly new image. This project maintains two matrices:
 
 - `active_screen` identifies the visible matrix.
-- Transition loops write only the hidden matrix.
-- One write to `$d018` displays the completed matrix on the next frame.
+- Layout transitions clear the hidden playfield, then draw platform spans.
+- One write to `$d018` selects the completed matrix immediately; hardware does
+  not defer that selection to the next frame.
 
-Color RAM has only one physical copy and does not switch with `$d018`. Purple
-spring and green conveyor colors must therefore be moved explicitly when their
-screen cells move to another row.
+Hidden matrices retain old contents, so new spans alone would leave stale tiles.
+Only the playfield is cleared, not the frame, ceiling, HUD or sprite pointers.
+Color RAM and dynamic glyphs are shared; their writes and the matrix flip still
+need appropriate raster timing.
 
 ## 9. Pixel-smooth upward motion with custom characters
 
@@ -274,10 +295,19 @@ two cells while crossing a character boundary:
 
 As `fine_scroll` decreases from 7 to 0:
 
-1. Phase 7 replaces each full platform with UPPER and LOWER screen codes.
+1. Phase 7 builds UPPER/LOWER spans from descriptors in the hidden matrix and flips.
 2. Intermediate phases rewrite only the eight rows of the dynamic glyphs.
-3. At phase 0, UPPER becomes FULL in the preceding row and LOWER is cleared.
-4. `fine_scroll` returns to 7 and a new logical row is generated at the bottom.
+3. At phase 0, reset `fine_scroll` to 7 and shift descriptors with score rows.
+4. Clear the hidden playfield, draw FULL spans, generate the bottom row and flip.
+
+`platform_rows.inc` stores three 20-byte arrays: start column, width and canonical
+FULL code. Width zero means empty; FULL encodes material plus fade/spring state.
+Each row holds at most one platform, with blank rows separating platforms.
+`draw_platform` records descriptors; fade/spring effects update them before
+transforming both matrices, and scene clears reset them. Transitions no longer
+scan 540 cells to rediscover geometry; the six intermediate pixel steps still
+only update glyphs. Collision remains screen-based, but directly writing screen
+characters alone no longer creates persistent scrolling geometry.
 
 The code never writes this software phase into `$d011`, so the status panel does
 not move vertically.
@@ -285,8 +315,11 @@ not move vertically.
 ## 10. Random platform generation
 
 `random_state_low/high` form a 16-bit Galois LFSR. `seed_random` mixes the KERNAL
-clock, CIA timers, time-of-day registers, the current raster line, and RAM data,
-so each startup receives a different layout. `random_byte` advances eight LFSR
+clock, CIA timers, time-of-day registers, raster timing and two loaded PRG bytes.
+Those bytes are not power-up RAM entropy, and the KERNAL clock no longer advances
+after the game takes over IRQs. Timing can change the seed but does not guarantee
+unique rounds. Replays need the same seed, difficulty changes and PRNG call order.
+`random_byte` advances eight LFSR
 bits and then XORs the high and low state bytes. Advancing only one bit and
 treating the result as a new byte would make adjacent values share seven bits
 and would bias platform types severely.
@@ -374,17 +407,33 @@ A collision is returned only when the feet are 0 through 2 pixels from the
 platform top. This prevents attachment from the side or underside. During a
 scroll transition, only LOWER is treated as the logical platform anchor; UPPER
 is a visual fragment only.
+The row address is selected through `playfield_row_low/high`, then the screen
+code indexes `collision_type_by_char`; no repeated row addition or CMP chain is needed.
 
 ## 14. Stateful platform types
 
 ### 14.1 Disappearing platforms
 
-After activation, the platform uses independent glyphs 60 through 62. The timer
-changes only the top two screen-code bits to flash red and gray. At the end of
-its lifetime, the active glyphs are removed from both screen buffers.
+There are three appearances, each with its own FULL/UPPER/LOWER glyphs:
+
+1. Idle: intact red bricks with gray mortar, using 56/57/58.
+2. Immediately after landing: some mortar falls away, using 7/16/17.
+3. After 25 frames: only red bricks remain, using 59/60/61.
+
+At 50 frames the platform disappears. The timer is halved from 100 to 50 frames,
+or approximately two seconds to one at PAL's 50 frames per second.
+`fade_platform_timer` starts at 50; `fade_stage=0` selects the cracked image,
+and reaching the 25-frame threshold sets `fade_stage=1` for the broken image.
+There is no flash counter or alternating color cycle.
+
+Three-entry tables convert FULL/UPPER/LOWER without changing screen-code prefix
+bits. Color RAM stays 10: pairs 00, 10, and 11 select black gaps, gray mortar
+(12), and red bricks (2). Shared pair 01 remains white; the global palette does
+not change. Expiry removes only active glyphs from both buffers, never normal
+bricks. Support and collision handling remain unchanged until deletion.
 
 Only one activated disappearing platform is tracked at a time. This is a
-deliberate tradeoff between limited ECM glyph slots and simple state handling.
+deliberate tradeoff between limited allocated glyph slots and simple state handling.
 
 ### 14.2 Spring platforms
 
@@ -401,20 +450,41 @@ the image without launching the player.
 
 ### 14.3 Left and right conveyors
 
-Conveyors repeat a green block with a black cut-out `<` or `>`. A feet collision
-returns 6 or 7, keeps the supported state, and uses an independent counter to
-push two pixels every three frames after the current frame's paddle movement.
+Conveyors repeat a white-and-blue texture that moves left or right while the
+platform continues upward. Their rectangular boundaries do not move horizontally.
+A feet collision returns 6 or 7, keeps the supported state, and uses an
+independent counter to push two pixels every three frames after the current
+frame's paddle movement.
 This equals the average normal paddle speed: opposite input mostly cancels the
 conveyor, while input in the same direction adds to it. Once the player is
 pushed beyond an edge, the next feet sample is empty and normal falling begins.
 
-The 64-glyph ECM character set has no six consecutive free slots. The
-implementation uses two techniques:
+The right conveyor starts from `$5f,$d7,$f5,$7d,$7d,$f5,$d7,$5f`; the left uses
+its horizontal mirror `$f5,$d7,$5f,$7d,$7d,$5f,$d7,$f5`. Mirroring reverses the
+four color pairs in each row, not the bits within a pair, so colors do not change.
+Color RAM=14 (8 | 6) selects multicolor blue;
+each byte contains four color pairs, with 01 white and 11 blue. Eight rows
+therefore form an 8x8 displayed tile. `initialize_conveyor_platforms` copies the
+source into separate eight-byte `conveyor_left_pattern` and
+`conveyor_right_pattern` buffers and resets `conveyor_animation_counter`.
+
+`update_conveyor_animation`, called after `update_spring_platform` every frame,
+rotates each row left/right by one color pair every three frames. That is two
+horizontal display pixels, giving four phases and a 12-frame loop. The texture
+animates even without a passenger and on frames with no upward world movement.
+Its counter is separate from the player's conveyor-push counter.
+
+The allocated 66-glyph character set still uses FULL/LOWER sharing to save space:
 
 1. Each direction lets FULL also serve as LOWER during a scroll transition, so
    only one additional UPPER glyph is required.
-2. Gameplay temporarily reuses the N, S, dash, and V title glyph slots. H stays
-   intact for the HP HUD. Modal entry restores N/S/dash/V from a template.
+2. FULL occupies body slots 5/6, while UPPER occupies fragment slots 18/19:
+   four slots in total. Modal text no longer aliases any fragment slots.
+   Modal entry installs a complete text page; new-game entry composes custom
+   graphics plus HUD text. Neither source charset is ever overwritten.
+3. Each horizontal animation update rebuilds the glyphs for the current vertical
+   phase. A completed coarse scroll restores FULL from the current runtime
+   patterns, not the original source, so horizontal animation does not reset.
 
 ## 15. Five-position paddle control
 
@@ -432,7 +502,7 @@ means the current frame plus two skipped frames.
 
 ## 16. Six-digit score and scrolling difficulty
 
-Score counts first landings on new platforms. Each of the 21 logical playfield
+Score counts first landings on new platforms. Each of the 20 logical playfield
 rows has one state byte: 0 means no platform, `$01` means unclaimed, and `$81`
 means claimed. A completed coarse scroll moves these states upward with their
 platform rows, and a newly generated bottom platform receives `$01`.
@@ -443,7 +513,7 @@ Safe supporting platforms call `award_platform_landing_score` from the airborne
 changes `$01` to `$81` while awarding one point. A spring bounce, walking away
 and returning, or continuing to stand on the platform cannot score again. The
 starting platform begins claimed, so returning to it also awards nothing. The
-panel displays `P:000000`.
+panel displays `SCORE:` on one row and six digits (`000000`) on the next.
 
 Spikes are the special non-supporting case that still counts as reached. After
 falling collision returns type 2, the code calls the same
@@ -486,17 +556,22 @@ The next fixed status row displays `HP:000`. Each new-platform point increments
 `health_points` without changing the six score digits. HP is an 8-bit binary
 value and is converted to three decimal cells only when it changes.
 
-Spikes and the top frame share the "spend HP or request game over" decision but
-use different recovery motion:
+HP can absorb both ordinary spike-platform hits and fixed ceiling hits:
 
 - Spike contact spends 1 HP, clears support, and assigns upward speed 16.
-- Top-frame contact spends 1 HP, moves the sprite eight pixels inside the frame,
-  clears support, and lets gravity resume.
+- Fixed ceiling contact spends 1 HP, cancels spring compression/support/rise,
+  places the head 8 pixels below the tips, and resumes gravity. No score is awarded.
 - Falling through the bottom bypasses HP and remains immediately fatal.
 
 Spending the last HP still absorbs the current hit and leaves `HP:000`; the next
-spike or top-frame hit is fatal. Moving away from the contact surface prevents
+hit from either spike type is fatal. Moving away from the contact surface prevents
 one hazard from draining multiple HP on consecutive frames.
+The brick-pattern top frame is row 1; inverted spikes are fixed in playfield row 2.
+Scrolling covers rows 3..22. Fixed geometry uses sprite-space screen origin
+Y=50, not the phase-biased platform base 43. Tip contact is at Y=73 and is checked
+on every carried pixel and every spring-rise pixel. The shared
+`handle_ceiling_damage` routine uses `GAMEPLAY` space to avoid overflowing
+`EXTCODE` into sprite storage.
 Each absorbed hit also reloads `player_hurt_timer` to 16. The frame selector
 checks this timer first, so the selected character's hurt frame overrides fall,
 left, right, and normal for about 0.32 seconds. After clearing the game-over
@@ -523,9 +598,9 @@ range. The second Fire must complete a press/release cycle while still neutral,
 preventing one long press from crossing both stages or starting with movement.
 
 The centering phase also displays `PRESS FIRE WHEN CHARACTER FACES YOU`.
-Previously missing W/C/Y/U glyphs temporarily occupy transition slots 31..34;
-no transition cells are visible on the modal screen, and the first gameplay
-transition rebuilds them before use. Off-center Fire points sprite 0 at the
+Modal entry calls `load_text_charset` to install the complete basic uppercase
+page, including A-Z and punctuation. New-game entry calls `load_game_charset`
+to compose graphics plus HUD text. Off-center Fire points sprite 0 at the
 selected hurt block for at least 12 frames. Releasing Fire restores the latest
 left/right/normal direction, giving an explicit visual error response.
 
@@ -562,7 +637,7 @@ After every change, run at least:
 Then inspect `build/nsshaft-c128.map`:
 
 - `CODE` must end before `$2800`.
-- `CHARSET` must occupy exactly `$2800-$29ff`.
+- `CHARSET` must occupy exactly `$2800-$2a0f`.
 - `MUSIC` and `EFFECTS` must not overlap the sprite region at `$3000`.
 - `GAMEPLAY` must end inside its linker-script reservation.
 - `EXTCODE` must end before `$3a00`.
@@ -573,14 +648,14 @@ Common problems:
 
 | Symptom | Check first |
 | --- | --- |
-| Garbled characters | `$d018`, charset address, and low six ECM screen-code bits |
+| Garbled characters | `$d018`, charset address, codes below 66, and Color RAM mode bit |
 | Player flashes during screen flips | Sprite pointers in both SCREEN_A and SCREEN_B |
 | HUD moves vertically | Whether `fine_scroll` was incorrectly written to `$d011` |
 | Landing occurs 8 pixels too early | Whether UPPER was incorrectly accepted as support |
 | Dial hand disappears | 63-byte templates and sprite 4 pointer `$3100/64` |
 | No sound | `$d01a/$d019`, SID volume, and VICE Sound settings |
 | Second round inherits old state | Whether the new variable is reset from `new_game` |
-| N/S/-/V become arrows on a modal screen | Call `restore_modal_font_glyphs` before drawing it |
+| Modal letters become platform fragments | Call `load_text_charset`; use modal `TEXT_*`, not game `CHAR_*` |
 
 ## 20. Exercises for beginning assembly programmers
 

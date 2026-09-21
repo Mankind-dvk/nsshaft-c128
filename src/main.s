@@ -74,10 +74,9 @@ start:
     lda #0
     sta VIC_SPRITE_ENABLE
 
-    ; 高分辨率字符模式。D011 启用扩展背景色模式，使每个屏幕码都能选择
-    ; 黑色、白色或红色，而无需逐帧移动 Color RAM。低三位固定为自然相位
-    ; 3，让 25 行字符矩阵完整覆盖可视区。
-    lda #$08
+    ; 混合多色/单色字符：关闭 ECM，每格 Color RAM bit 3 决定解释方式。
+    ; 自然相位 3 不变；砖台阶和尖刺为多色，文字、表盘等仍为单色。
+    lda #$18
     sta VIC_CONTROL_2
     lda #VIC_CONTROL_1_TEXT
     sta VIC_CONTROL_1
@@ -87,11 +86,11 @@ start:
     sta VIC_BACKGROUND_COLOR
     lda #COLOR_WHITE
     sta VIC_MULTICOLOR_1
-    lda #COLOR_RED
+    lda #COLOR_GRAY
     sta VIC_MULTICOLOR_2
     lda #COLOR_GRAY
     sta VIC_BACKGROUND_COLOR_3
-    ; 参考旧版 UI：硬件边框保持黑色，青色框完全由字符绘制。
+    ; 硬件边框保持黑色，砖纹外框完全由字符绘制。
     lda #COLOR_BLACK
     sta VIC_BORDER_COLOR
 
@@ -120,8 +119,9 @@ new_game:
     sta game_over_flag
     lda #7
     sta fine_scroll
-    lda #VIC_CONTROL_1_TEXT
-    sta VIC_CONTROL_1
+    ; 按双源字库合成方式重建游戏字形；此时 IRQ 尚未开启。
+    ; EN: Compose game glyphs before any platform/HUD uses its IDs.
+    jsr load_game_charset
     SHOW_SCREEN SCREEN_A_D018
 
     jsr clear_screens_and_colors
@@ -146,6 +146,7 @@ new_game:
 
     ; 屏幕 B 初始为当前可见游戏画面与 UI 的完全一致的隐藏副本。
     jsr prepare_screen_b_from_a
+    jsr enable_charset_display
 
 .ifdef MUSIC_REGRESSION_TEST
     ; 测试版本冻结游戏逻辑，让 VICE 能完整记录 16 小节和循环衔接。
@@ -154,9 +155,9 @@ music_regression_loop:
     jmp music_regression_loop
 .endif
 
-; EN: Deterministic PAL-frame scheduler; game_over_flag is handled after updates.
+; EN: Target one update per PAL frame; game_over_flag is handled after updates.
 main_loop:
-    ; 这一段是游戏的固定逐帧调度表。前八个 JSR 每帧执行一次；平台世界
+    ; 这一段是游戏的固定逐帧调度表。输入、物理、效果和表面动画每帧更新；平台世界
     ; 的一像素上移由定点相位累加器控制；首次落到新平台时才增加分数。
     jsr wait_for_frame
     jsr read_paddle_x
@@ -166,6 +167,7 @@ main_loop:
     jsr update_player_vertical
     jsr update_fade_platform
     jsr update_spring_platform
+    jsr update_conveyor_animation
     jsr update_player_sprite_frame
     lda game_over_flag
     beq @continue_game
@@ -175,6 +177,8 @@ main_loop:
     jsr scroll_step_ready
     bcc main_loop
     jsr scroll_one_pixel_up
+    lda game_over_flag
+    bne game_over_screen
     jmp main_loop
 
 ; EN: Stop gameplay/music, show the modal screen, then rebuild a fresh round.
@@ -202,7 +206,9 @@ wait_for_frame:
 ; 子系统在文件中的排列顺序不会改变运行时调用顺序。ca65 会解析上方调度
 ; 代码产生的所有前向引用。
 .include "video.inc"
+.include "platform_materials.inc"
 .include "platforms.inc"
+.include "platform_rows.inc"
 .include "input.inc"
 .include "hud.inc"
 .include "score.inc"

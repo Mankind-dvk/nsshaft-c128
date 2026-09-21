@@ -7,18 +7,18 @@
 ;   Compile-time addresses and immutable layout/tuning values live here. `$`
 ;   introduces hexadecimal, `%` binary, `<`/`>` select address bytes, and these
 ;   definitions consume no runtime RAM. Keep hardware registers named and keep
-;   playfield calculations inside the cyan frame and left of the HUD divider.
+;   playfield calculations inside the brick frame and below the ceiling spikes.
 ;
 ; 初学者语法提示：
 ;   $1234       十六进制常量；%10101010 是二进制常量。
 ;   NAME = ...  汇编期常量，不会在运行时占用 RAM。
 ;   <label      取地址低字节；>label 取地址高字节。
-;   |           汇编期按位 OR，例如 $40 | 31 组合 ECM 颜色位和字形编号。
+;   |           汇编期按位 OR，例如 MULTICOLOR_CELL | COLOR_WHITE。
 ;   +、-、*     这里都由 ca65 在汇编期计算，不消耗 8502 运行时间。
 ;
-; 屏幕矩阵与双栏布局。青色框内的第 29 列是实心 UI 分隔条，因此平台
+; 屏幕矩阵与双栏布局。砖纹框内的第 29 列是同纹理 UI 分隔条，因此平台
 ; 生成、软件滚动和碰撞采样都必须避开框线与状态栏。
-; EN: The playfield excludes the cyan frame and column-29 HUD divider.
+; EN: The playfield excludes the brick frame, ceiling spikes and HUD divider.
 SCREEN_A                = $0400
 SCREEN_B                = $0c00
 COLOR_RAM               = $d800
@@ -30,7 +30,8 @@ UI_FRAME_LEFT_COLUMN    = 1
 UI_FRAME_RIGHT_COLUMN   = 38
 UI_FRAME_WIDTH          = UI_FRAME_RIGHT_COLUMN - UI_FRAME_LEFT_COLUMN + 1
 UI_FRAME_HEIGHT         = UI_FRAME_BOTTOM_ROW - UI_FRAME_TOP_ROW + 1
-PLAYFIELD_TOP_ROW       = UI_FRAME_TOP_ROW + 1
+CEILING_SPIKE_ROW       = UI_FRAME_TOP_ROW + 1
+PLAYFIELD_TOP_ROW       = CEILING_SPIKE_ROW + 1
 PLAYFIELD_BOTTOM_ROW    = UI_FRAME_BOTTOM_ROW - 1
 PLAYFIELD_ROW_COUNT     = PLAYFIELD_BOTTOM_ROW - PLAYFIELD_TOP_ROW + 1
 PLAYFIELD_FIRST_COLUMN  = UI_FRAME_LEFT_COLUMN + 1
@@ -39,13 +40,14 @@ STATUS_FIRST_COLUMN     = UI_DIVIDER_COLUMN + 1
 PLAYFIELD_LAST_COLUMN   = UI_DIVIDER_COLUMN - 1
 DIAL_FIRST_COLUMN       = STATUS_FIRST_COLUMN
 DIAL_TOP_ROW            = 20
-POTX_ROW                = PLAYFIELD_TOP_ROW
+POTX_ROW                = UI_FRAME_TOP_ROW + 1
 SCORE_ROW               = POTX_ROW + 2
 HP_ROW                  = SCORE_ROW + 2
 HP_FIRST_COLUMN         = STATUS_FIRST_COLUMN + 1
 PLAYFIELD_BOTTOM_OFFSET = PLAYFIELD_BOTTOM_ROW * SCREEN_COLUMNS
 POTX_DISPLAY_OFFSET     = POTX_ROW * SCREEN_COLUMNS + STATUS_FIRST_COLUMN
 SCORE_DISPLAY_OFFSET    = SCORE_ROW * SCREEN_COLUMNS + STATUS_FIRST_COLUMN
+SCORE_DIGITS_OFFSET     = SCORE_DISPLAY_OFFSET + SCREEN_COLUMNS
 HP_DISPLAY_OFFSET       = HP_ROW * SCREEN_COLUMNS + HP_FIRST_COLUMN
 SCORE_DIGIT_COUNT       = 6
 HP_DIGIT_COUNT          = 3
@@ -99,7 +101,7 @@ MMU_CONFIG              = $ff00
 MMU_CONFIG_BANK0_IO     = $0e
 ; 25 行模式的自然垂直相位是 3：字符矩阵从光栅线 $33 开始，完整覆盖
 ; 200 条可视线，不需要 sprite 填补顶部或底部的相位空隙。
-VIC_CONTROL_1_TEXT      = $5b
+VIC_CONTROL_1_TEXT      = $1b
 
 ; CIA 端口与定时器。DDR（Data Direction Register）中的 1 表示输出、0 表示
 ; 输入。CIA2 端口 A 的位 0..1 用于选择 VIC bank 0。
@@ -130,7 +132,7 @@ SID_POTX                = $d419
 PADDLE_PORT_1_SELECT    = $40
 
 ; SID 三声道音乐播放器使用的寄存器。每个硬件声道包含频率、波形/门控和
-; ADSR 包络寄存器。音乐代码位于 $2a00，不占用字符集和 sprite 数据区；
+; ADSR 包络寄存器。音乐代码位于 $2a10，不占用字符集和 sprite 数据区；
 ; 播放器由光栅 IRQ 每个 PAL 帧调用一次。
 SID_VOICE_1_FREQ_LOW    = $d400
 SID_VOICE_1_FREQ_HIGH   = $d401
@@ -241,79 +243,9 @@ CHARACTER_SELECT_RIGHT_X      = 248
 CHARACTER_SELECT_Y            = 124
 CHARACTER_SELECT_HURT_FRAMES  = 12
 
-; 自定义屏幕码。扩展背景色模式（ECM）把屏幕码高两位解释为背景色选择器，
-; 低六位才是 0..63 的字形编号。因此本项目的自定义字符集固定为 64 个字形。
-CHAR_BLANK              = 0
-CHAR_PLATFORM_FULL      = $41
-CHAR_SPIKE_TRIANGLE     = $82
-CHAR_WALL               = 3
-CHAR_DIGIT_0            = 4
-CHAR_P                  = 14
-CHAR_O                  = 15
-CHAR_T                  = 16
-CHAR_X                  = 17
-CHAR_COLON              = 18
-CHAR_N                  = 19
-CHAR_S                  = 20
-CHAR_DASH               = 21
-CHAR_H                  = 22
-CHAR_A                  = 23
-CHAR_F                  = 24
-CHAR_R                  = 25
-CHAR_E                  = 26
-CHAR_I                  = 27
-CHAR_G                  = 28
-CHAR_M                  = 29
-CHAR_V                  = 30
-
-; 选人回中提示需要 W/C/Y/U。它们只在模态画面使用，临时占用游戏中的四个
-; 平台过渡字形槽；开始新游戏后的第一次平台转场会重新生成这些字形。
-CHAR_W                  = 31
-CHAR_C                  = 32
-CHAR_Y                  = 33
-CHAR_U                  = 34
-
-; 游戏过程中，标题画面暂时不用的 N/S/-/V 四个字形槽会改写为传送平台。
-; LEFT/RIGHT_FULL 同时承担“完整字符”和滚动中的下部碎片；粗滚动完成后再
-; 恢复完整箭头。进入标题或结束画面前必须调用 restore_modal_font_glyphs。
-CHAR_CONVEYOR_LEFT_FULL  = CHAR_N
-CHAR_CONVEYOR_LEFT_UPPER = CHAR_S
-CHAR_CONVEYOR_RIGHT_FULL = CHAR_DASH
-CHAR_CONVEYOR_RIGHT_UPPER = CHAR_V
-CHAR_NORMAL_UPPER       = $40 | CHAR_W
-CHAR_NORMAL_LOWER       = $40 | CHAR_C
-CHAR_SPIKE_UPPER        = $80 | CHAR_Y
-CHAR_SPIKE_LOWER        = $80 | CHAR_U
-CHAR_UI_FRAME           = 35
-CHAR_DIAL_ROW_1         = 36
-CHAR_DIAL_ROW_2         = 44
-CHAR_DIAL_ROW_3         = 52
-
-; 表盘中原本完全空白的六个字形槽改作弹簧平台。表盘数据会在这些位置直接
-; 使用 CHAR_BLANK，因此不会改变表盘外观。弹簧使用黑色背景和紫色 Color RAM
-; 前景，不占用已经分配给白色、红色和灰色平台的 ECM 背景色槽。
-CHAR_SPRING_FULL              = 36
-CHAR_SPRING_UPPER             = 43
-CHAR_SPRING_LOWER             = 46
-CHAR_SPRING_COMPRESSED_FULL   = 47
-CHAR_SPRING_COMPRESSED_UPPER  = 48
-CHAR_SPRING_COMPRESSED_LOWER  = 49
-
-; 消失平台使用 ECM 的第四背景色作为灰色。激活后改用独立的 60..62
-; 号字形，这样红/灰闪烁不会误改尚未踩过的灰色平台。
-CHAR_FADE_FULL          = $c0 | 1
-CHAR_FADE_UPPER         = $c0 | 31
-CHAR_FADE_LOWER         = $c0 | 32
-CHAR_FADE_ACTIVE_RED_FULL  = $80 | 60
-CHAR_FADE_ACTIVE_RED_UPPER = $80 | 61
-CHAR_FADE_ACTIVE_RED_LOWER = $80 | 62
-CHAR_FADE_ACTIVE_GRAY_FULL  = $c0 | 60
-CHAR_FADE_ACTIVE_GRAY_UPPER = $c0 | 61
-CHAR_FADE_ACTIVE_GRAY_LOWER = $c0 | 62
-FADE_ACTIVE_GLYPH_FIRST = 60
-FADE_ACTIVE_GLYPH_LAST  = 62
-FADE_COLOR_RED_PREFIX   = $80
-FADE_COLOR_GRAY_PREFIX  = $c0
+; 游戏字形/屏幕码和独立菜单文字屏幕码；无碎片/字母复用别名。
+; EN: Game glyph IDs/screen codes and separate modal text codes.
+.include "charset_ids.inc"
 
 ; 开始/结束画面的文字位置，使用相对于任一屏幕缓冲区的偏移量表示。
 TITLE_OFFSET            = 8 * SCREEN_COLUMNS + 16
@@ -334,6 +266,14 @@ COLOR_BLUE              = 6
 COLOR_YELLOW            = 7
 COLOR_GRAY              = 12
 COLOR_LIGHT_BLUE        = 14
+
+; 共享白/灰色，局部色用于红砖、白绿尖刺和虚化平台的红色砖块。
+; EN: Shared white/gray; local red or green keeps materials independent.
+BRICK_CELL_COLOR        = MULTICOLOR_CELL | COLOR_RED
+SPIKE_CELL_COLOR        = MULTICOLOR_CELL | COLOR_GREEN
+FADE_CELL_COLOR         = MULTICOLOR_CELL | COLOR_RED
+CONVEYOR_CELL_COLOR     = MULTICOLOR_CELL | COLOR_BLUE
+UI_FRAME_COLOR          = BRICK_CELL_COLOR
 
 ; 世界滚动使用 8 位相位累加器。每帧把 rate 加入 accumulator，只有无符号
 ; 加法产生进位时才上移一像素。128/256=0.5 像素/帧，保持原版实际速度；
@@ -382,6 +322,8 @@ COLLISION_CONVEYOR_RIGHT     = 7
 ; 让传送速度与人物输入真正叠加，而不是共用节流相位。
 CONVEYOR_MOVE_DELAY     = 2
 CONVEYOR_PUSH_STEP      = 2
+; 表面每三帧循环移动一个多色像素（两显示像素），不依赖人物是否站在上面。
+CONVEYOR_ANIMATION_FRAMES = 3
 POTX_DEADZONE_LOW       = 108
 POTX_DEADZONE_HIGH      = 148
 POTX_FAR_LEFT_END       = 64
@@ -389,29 +331,33 @@ POTX_FAR_RIGHT_START    = 192
 PLAYER_MOVE_DELAY       = 2
 PLAYER_FAST_MOVE_DELAY  = 1
 PLAYER_MOVE_STEP        = 2
-; 玩家被限制在青色字符框内部：列 2 从 sprite X=40 开始，右侧分隔条
+; 玩家被限制在砖纹字符框内部：列 2 从 sprite X=40 开始，右侧分隔条
 ; 位于 X=256，因此 24 像素宽的玩家最右只能到 X=232。
 PLAYER_MIN_X            = 40
 PLAYER_MAX_X_LOW        = $e8
 PLAYER_MAX_X_HIGH       = 0
 PLAYER_HEIGHT           = 21
-SCREEN_ROW0_BASE_Y      = 43
+; 固定字符矩阵在 sprite 坐标系的首行 Y=50；43 只是平台软件相位的基值，
+; 加 fine_scroll=7 才得到完整字符位置。固定危险区不能直接使用 43。
+; EN: Fixed screen origin versus phase-biased moving-platform origin.
+SCREEN_CHARACTER_TOP_Y = 50
+SCREEN_ROW0_BASE_Y      = SCREEN_CHARACTER_TOP_Y - 7
 GRAVITY_MAX             = 8
 SPIKE_DAMAGE_BOUNCE_VELOCITY = 16
-TOP_DAMAGE_DROP_PIXELS  = 8
+CEILING_DAMAGE_DROP_PIXELS = 8
 PLAYER_HURT_FRAMES      = 16
 
-; 顶框第 1 行的上沿位于 Y=51；底框第 23 行的下沿位于 Y=234。player_y
-; 表示 21 像素高 sprite 的顶端，所以底端接触 Y=234 时 player_y=214。
-; 两个阈值都包含接触位置：刚碰到框线外沿就触发 game over。
-PLAYER_TOP_GAME_OVER_Y  = SCREEN_ROW0_BASE_Y + UI_FRAME_TOP_ROW * 8
-PLAYER_BOTTOM_GAME_OVER_Y = SCREEN_ROW0_BASE_Y + (UI_FRAME_BOTTOM_ROW + 1) * 8 - PLAYER_HEIGHT
+; 倒尖刺占第 2 行，尖端最后一个像素在 Y=73。sprite 顶端接触该行尖端
+; 时扣 1 HP 并下移脱离；HP 已为 0 才死亡。底部接触 Y=234 仍直接死亡（Y=214）。
+; EN: Ceiling contact spends HP and drops below the last tip pixel; zero HP is fatal.
+PLAYER_CEILING_CONTACT_Y = SCREEN_CHARACTER_TOP_Y + (CEILING_SPIKE_ROW + 1) * 8 - 1
+PLAYER_BOTTOM_GAME_OVER_Y = SCREEN_CHARACTER_TOP_Y + UI_FRAME_BOTTOM_ROW * 8 - (PLAYER_HEIGHT-1)
 
-; PAL 下约两秒后消失，每 8 帧切换一次红/灰显示。
-FADE_PLATFORM_LIFETIME  = 100
-FADE_PLATFORM_FLASH_PERIOD = 8
+; 踩下后部分脱落，25 帧后只剩砖块，50 帧后消失（PAL 约一秒）。
+FADE_PLATFORM_LIFETIME  = 50
+FADE_PLATFORM_BROKEN_TIME = FADE_PLATFORM_LIFETIME / 2
 FADE_EFFECT_ACTIVATE    = 0
-FADE_EFFECT_RECOLOR     = 1
+FADE_EFFECT_ADVANCE     = 1
 FADE_EFFECT_REMOVE      = 2
 
 ; 弹簧落地后先压缩数帧，再以 1/8 像素为单位给人物一个向上的初速度。

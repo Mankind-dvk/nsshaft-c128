@@ -1,7 +1,7 @@
 ; ---------------------------------------------------------------------------
 ; 弹簧平台压缩、恢复与发射
 ; ---------------------------------------------------------------------------
-; 弹簧完整时使用“工”字形。人物落地后，把同一平台在两个屏幕缓冲区中的
+; 弹簧放松时使用折线线圈，压缩时为下半格实心块。人物落地后，把两个屏幕中的
 ; 完整/碎片屏幕码全部换成压扁版本；短暂停留后恢复图形并给予人物向上速度。
 ; 若人物在发射前走出平台，图形会恢复，但不会产生弹跳。
 ;
@@ -13,7 +13,7 @@
 ; 弹簧不删除平台，只在 normal 与 compressed 两套屏幕码之间来回转换。
 ;
 ; English summary:
-;   Builds smooth-scroll fragments for normal and compressed I-shaped springs.
+;   Builds smooth-scroll fragments for relaxed coils and compressed solid blocks.
 ;   Landing records the anchor row, transforms both buffers, and starts an
 ;   eight-frame compression timer. Expiry restores the glyph and assigns upward
 ;   speed; walking away restores it without launching.
@@ -107,10 +107,10 @@ cancel_spring_platform:
 @done:
     rts
 
-; 压缩倒计时结束后恢复“工”字形，并切换到独立的向上运动状态。
+; 压缩倒计时结束后恢复放松字形，并切换到独立的向上运动状态。
 ; EN: On timer expiry restore the spring, clear support, and assign upward velocity.
 update_spring_platform:
-    ; 每帧调用。倒计时归零时先恢复“工”字形，再清除支撑并设置
+    ; 每帧调用。倒计时归零时先恢复放松字形，再清除支撑并设置
     ; player_rise_velocity；实际向上位移由下一帧 update_player_vertical 完成。
     lda player_on_spring
     beq @done
@@ -158,6 +158,7 @@ advance_spring_platform_scroll_position:
 apply_spring_effect_to_buffers:
     ; 输入：spring_platform_row、spring_effect_mode。输出：同步修改 A/B 两屏
     ; 锚点附近三行。紫色 Color RAM 不需要改，因为压缩前后都使用同一颜色。
+    jsr update_spring_row_description
     SET_WORD ROW_PTR, SCREEN_A
     SET_WORD DEST_PTR, SCREEN_B
 

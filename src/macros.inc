@@ -2,7 +2,6 @@
 ; Short compile-time operations / 短操作宏
 ; ---------------------------------------------------------------------------
 ; 宏在汇编时原地展开，不是 JSR 子程序，也不自动保存寄存器。
-; 本次仅封装已有指令序列：机器码、寄存器副作用和周期数保持不变。
 ; 参数中的地址、偏移和位掩码都是编译期表达式；A/X/Y 的值属于运行期。
 ; 不在宏中隐藏循环、状态机、内存 bank 切换或 IRQ 栈协议。
 ; EN: Inline assembly helpers, not runtime calls. Each contract below describes

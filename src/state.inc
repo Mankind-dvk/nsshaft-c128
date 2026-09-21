@@ -1,7 +1,7 @@
 ; ---------------------------------------------------------------------------
 ; 可变游戏状态
 ; ---------------------------------------------------------------------------
-; PRG 装载时这些字节均为零；开始新游戏时，再由各自所属的子系统显式
+; PRG 装载时这些字节带有下方声明的初值；开始新游戏时，由各自所属的子系统显式
 ; 初始化。集中存放这些变量，可以在一个简短文件中直接看清 RAM 占用和
 ; 子系统之间的耦合关系。
 ;
@@ -67,6 +67,19 @@ selected_platform_char:
 selected_platform_color:
     .byte COLOR_BLACK
 
+; One platform per logical row; width=0 means empty. FULL encodes material
+; and fade/spring state, independently of either screen's fragment layout.
+platform_row_start:
+    .res PLAYFIELD_ROW_COUNT, 0
+platform_row_width:
+    .res PLAYFIELD_ROW_COUNT, 0
+platform_row_full:
+    .res PLAYFIELD_ROW_COUNT, 0
+platform_render_end:
+    .byte 0
+platform_render_bank:
+    .byte 0
+
 ; --- Paddle、HUD 与音乐 ---------------------------------------------------
 ; 六个独立十进制位从最高位到最低位连续排列。这样既不需要 16 位除法，也不
 ; 需要会影响 SID IRQ 的十进制模式；HUD 可直接把每一位转换为数字字符。
@@ -75,7 +88,7 @@ score_digits:
 score_digits_end:
 .assert score_digits_end-score_digits = SCORE_DIGIT_COUNT, error, "score digit count mismatch"
 
-; HP 是可吸收的伤害次数，0 表示下一次尖刺/顶框伤害会结束游戏。每得到一个
+; HP 是可吸收的尖刺平台/顶部倒尖刺伤害次数；底部越界始终直接死亡。每得到一个
 ; 新平台分数就推进 progress，累计三次后 HP+1，分数本身保持不变。
 health_points:
     .byte 0
@@ -193,10 +206,8 @@ fade_platform_row:
     .byte 0
 fade_platform_timer:
     .byte 0
-fade_flash_counter:
-    .byte 0
-fade_color_prefix:
-    .byte FADE_COLOR_RED_PREFIX
+fade_stage:
+    .byte FADE_STAGE_CRACKED
 fade_effect_mode:
     .byte FADE_EFFECT_ACTIVATE
 fade_rows_remaining:
@@ -222,3 +233,14 @@ random_state_low:
     .byte 0
 random_state_high:
     .byte 0
+
+; --- 传送带表面动画 -------------------------------------------------------
+; 水平相位保存在两套可写完整图案中，与不可变源字形和垂直滚动碎片分开。
+conveyor_animation_counter:
+    .byte CONVEYOR_ANIMATION_FRAMES
+conveyor_left_pattern:
+    .res 8, 0
+conveyor_right_pattern:
+    .res 8, 0
+
+.assert * <= CHARSET_ADDRESS, error, "Main code/state overlaps live charset"

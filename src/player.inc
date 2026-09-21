@@ -44,7 +44,7 @@ initialize_player:
     lda character_color_table, y
     sta VIC_SPRITE_0_COLOR
 
-    lda #22
+    lda #PLAYFIELD_BOTTOM_ROW
     sta spawn_row
     jsr position_player_on_platform
 
@@ -224,22 +224,21 @@ update_player_horizontal:
 ; EN: Run supported, spring-rise, gravity, landing, and game-over state transitions.
 update_player_vertical:
     ; 这是玩家垂直状态机，按顺序处理三种互斥状态：
-    ;   1. player_on_platform != 0：检查支撑和顶框；
+    ;   1. player_on_platform != 0：检查支撑；
     ;   2. player_rise_velocity != 0：执行弹簧上升；
     ;   3. 其他：执行重力下落和着陆检测。
     ; 返回值不使用；需要结束游戏时只设置 game_over_flag，由 main_loop 收口。
+    ; 三种状态都先检查顶部倒尖刺；有 HP 则扣血脱离，否则结束游戏。
+    ; EN: Check the ceiling before every vertical state, including falling.
+    lda player_y
+    cmp #(PLAYER_CEILING_CONTACT_Y+1)
+    bcs @below_ceiling
+    jmp handle_ceiling_damage
+@below_ceiling:
     lda player_on_platform
     bne @supported
     jmp @airborne
 @supported:
-
-    lda player_y
-    ; 顶端 Y 小于或等于顶框上沿时立即结束。比较阈值加一，可以在无符号
-    ; 比较中把“相等”也归入越界，而不会晚一个像素。
-    cmp #(PLAYER_TOP_GAME_OVER_Y+1)
-    bcs @supported_in_bounds
-    jmp handle_top_damage
-@supported_in_bounds:
 
     ; 走出当前支撑平台的范围后开始下落。
     jsr find_platform_below_player
@@ -314,13 +313,8 @@ update_player_vertical:
     beq @falling
 
 ; 弹簧上升速度和重力一样以 1/8 像素表示。初速度大于 8，因此一帧可能
-; 上移多个像素；逐像素循环可保证高速上升也不会越过顶框判定。
+; 上移多个像素；逐像素循环可保证高速上升也不会穿过固定倒尖刺。
 @rising:
-    lda player_y
-    cmp #(PLAYER_TOP_GAME_OVER_Y+1)
-    bcs @rise_in_bounds
-    jmp handle_top_damage
-@rise_in_bounds:
     lda player_fall_fraction
     clc
     adc player_rise_velocity
@@ -335,9 +329,9 @@ update_player_vertical:
     dec player_y
     lda player_y
     sta VIC_SPRITE_0_Y
-    cmp #(PLAYER_TOP_GAME_OVER_Y+1)
+    cmp #(PLAYER_CEILING_CONTACT_Y+1)
     bcs @rise_pixel
-    jmp handle_top_damage
+    jmp handle_ceiling_damage
 @decelerate_rise:
     dec player_rise_velocity
     bne @done
@@ -520,7 +514,9 @@ find_platform_below_player:
     lsr
     lsr
     lsr
-    cmp #SCREEN_ROWS
+    cmp #PLAYFIELD_TOP_ROW
+    bcc @none
+    cmp #PLAYFIELD_BOTTOM_ROW+1
     bcs @none
     sta collision_row
     jsr set_collision_row_pointer
@@ -544,27 +540,25 @@ find_platform_below_player:
 ; EN: Point ROW_PTR at collision_row in the currently visible screen matrix.
 set_collision_row_pointer:
     ; 输入：collision_row、active_screen。输出：ROW_PTR 指向当前可见屏幕的
-    ; 对应字符行。advance_row_pointer 每次增加 40 字节，即前进一整行。
+    ; 对应字符行。调用者已经把行限制在游戏区，因此可以复用平台行地址表，
+    ; 不再从屏幕首地址逐行增加 40 字节。
+    lda collision_row
+    sec
+    sbc #PLAYFIELD_TOP_ROW
+    tax
+
+    lda playfield_row_low, x
+    sta ROW_PTR
     lda active_screen
     beq @screen_a
-    lda #<SCREEN_B
-    sta ROW_PTR
-    lda #>SCREEN_B
-    bne @base_ready
+    lda playfield_row_high, x
+    ora #>SCREEN_B
+    bne @store_high
 @screen_a:
-    lda #<SCREEN_A
-    sta ROW_PTR
-    lda #>SCREEN_A
-@base_ready:
+    lda playfield_row_high, x
+    ora #>SCREEN_A
+@store_high:
     sta ROW_PTR+1
-
-    ldx collision_row
-    beq @done
-@advance:
-    jsr advance_row_pointer
-    dex
-    bne @advance
-@done:
     rts
 
 ; 输入 A 为 24 像素宽 sprite 内部的 X 偏移。
@@ -598,60 +592,13 @@ sample_platform_at_player_offset:
 
     ldy collision_x_low
     lda (ROW_PTR), y
-    cmp #CHAR_PLATFORM_FULL
-    beq @normal
-    cmp #CHAR_NORMAL_LOWER
-    beq @normal
-    cmp #CHAR_SPIKE_TRIANGLE
-    beq @spikes
-    cmp #CHAR_SPIKE_LOWER
-    beq @spikes
-    cmp #CHAR_FADE_FULL
-    beq @fade_inactive
-    cmp #CHAR_FADE_LOWER
-    beq @fade_inactive
-    cmp #CHAR_FADE_ACTIVE_RED_FULL
-    beq @fade_active
-    cmp #CHAR_FADE_ACTIVE_RED_LOWER
-    beq @fade_active
-    cmp #CHAR_FADE_ACTIVE_GRAY_FULL
-    beq @fade_active
-    cmp #CHAR_FADE_ACTIVE_GRAY_LOWER
-    beq @fade_active
-    cmp #CHAR_SPRING_FULL
-    beq @spring
-    cmp #CHAR_SPRING_LOWER
-    beq @spring
-    cmp #CHAR_SPRING_COMPRESSED_FULL
-    beq @spring
-    cmp #CHAR_SPRING_COMPRESSED_LOWER
-    beq @spring
-    cmp #CHAR_CONVEYOR_LEFT_FULL
-    beq @conveyor_left
-    cmp #CHAR_CONVEYOR_RIGHT_FULL
-    beq @conveyor_right
-    lda #0
+    cmp #CHARSET_GLYPH_COUNT
+    bcs @none
+    tay
+    lda collision_type_by_char, y
     rts
-@normal:
-    lda #COLLISION_NORMAL
-    rts
-@spikes:
-    lda #COLLISION_SPIKES
-    rts
-@fade_inactive:
-    lda #COLLISION_FADE_INACTIVE
-    rts
-@fade_active:
-    lda #COLLISION_FADE_ACTIVE
-    rts
-@spring:
-    lda #COLLISION_SPRING
-    rts
-@conveyor_left:
-    lda #COLLISION_CONVEYOR_LEFT
-    rts
-@conveyor_right:
-    lda #COLLISION_CONVEYOR_RIGHT
+@none:
+    lda #COLLISION_NONE
     rts
 
 ; collision_type 已由本帧脚底采样确定。传送位移不使用 paddle 的节流计数器：
@@ -716,8 +663,7 @@ apply_conveyor_motion:
 @write_right:
     jmp write_player_x
 
-; 查找画面中最低的普通平台并将玩家放到上面。玩家碰到尖刺或离开竖井后
-; 使用此流程重新定位。
+; 检查本帧是否允许拨盘移动；到期后根据普通或加速状态重装移动间隔。
 ; EN: Return C=1 when paddle movement is due; reload normal or fast delay.
 player_movement_ready:
     ; 输出：C=1 表示本帧允许移动，C=0 表示仍在等待；调用者用 BCC 判断。

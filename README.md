@@ -13,13 +13,20 @@ The game implements the core NS-Shaft descent loop. Platforms are custom
 character tiles and move upward one pixel at a time. A player standing on a
 platform is carried upward with it; walking beyond an edge starts a
 gravity-driven fall. The player lands on the next supporting platform below.
-Spikes and the top frame consume HP when available; falling through the bottom
-still ends the current game immediately. Gray
-platforms flash red and disappear after being stepped on. Purple spring
-platforms use a temporary `工`-shaped tile: landing compresses the tile, then
-launches the player upward before normal gravity resumes. Green conveyor
-platforms repeat a black cut-out `<` or `>` symbol and push a supported player
-two pixels every three frames in the indicated direction.
+The red-brick/white-mortar character frame has a fixed row of white/green downward spikes beneath its
+top edge, over the playfield only. Head contact consumes 1 HP and drops the
+player clear of the ceiling; contact with zero HP is fatal. Ordinary spike
+platforms also consume HP when available; falling through the bottom ends the
+game immediately regardless of HP. Disappearing platforms start as red bricks
+with gray mortar. Stepping on one removes part of the mortar; after 25 frames
+only the bricks remain, and after 50 frames the platform disappears. This halves
+the previous 100-frame lifetime from about two seconds to one on PAL. Purple spring
+platforms use a zigzag coil tile: landing compresses it into a solid lower-half block, then
+launches the player upward before normal gravity resumes. White-and-blue conveyor
+platforms scroll their repeating texture left or right by two pixels every three
+frames while the platform itself continues upward. Their horizontal boundaries
+stay fixed; a supported player is pushed two pixels every three frames in the
+texture's direction.
 
 The program opens on an `NS-SHAFT / PRESS FIRE` character-selection screen.
 Three normal sprites are shown side by side: Elien, Ember, and Wasser. POTX
@@ -37,23 +44,24 @@ After `GAME OVER`, FIRE returns to the selection screen so the next round may
 use another character. Scrolling and gameplay are paused throughout these modal
 screens.
 
-Platform positions and widths are generated at runtime from a PRNG seeded with
-the KERNAL clock, CIA timers/TOD, the current raster line, and power-up RAM. On
-real hardware, load timing and RAM power-up state vary naturally. The VICE
-launchers also pass a host-time-derived emulator seed so autostart launches do
-not repeat VICE's deterministic power-up state.
+Platform positions and widths use a PRNG seeded from the KERNAL clock, CIA
+timers/TOD and raster timing, mixed with two bytes inside the loaded PRG. Those
+bytes are not power-up RAM entropy, and the KERNAL clock stops updating once
+the game takes over IRQ service. Timing can vary the seed; uniqueness is not
+guaranteed. The VICE launcher also supplies a host-time-derived emulator seed.
 
 Each generated platform also uses the same PRNG stream to select from six
 custom-character styles:
 
 - normal platform
-- red upward-pointing spike platform
-- gray disappearing platform
-- purple `工`-shaped spring platform
-- green left conveyor (`<`)
-- green right conveyor (`>`)
+- white/green multicolor upward-pointing spike platform
+- red-brick/gray-mortar disappearing platform
+- purple zigzag spring platform
+- white-and-blue conveyor with a left-scrolling texture
+- white-and-blue conveyor with a right-scrolling texture
 
-Position, width, and type are therefore reproducible together for a given seed.
+Position, width, and type are reproducible for the same seed, difficulty changes,
+and PRNG call order.
 Type selection uses score-gated weighted pools rather than exposing every hazard
 at the start:
 
@@ -68,15 +76,19 @@ at the start:
 Normal platforms may repeat freely. Every other individual type is limited to
 two consecutive generated platforms; a third identical candidate consumes the
 next deterministic PRNG byte and is selected again.
-The moving cells use VIC-IIe extended-color character mode. Normal platform
-screen codes select `$d022` (white) and fill the complete 8x8 character.
-Spike screen codes select `$d023` (red), while a black foreground mask shapes
-each cell into a hires isosceles triangle. Disappearing platforms use `$d024`
-(gray) until activated. Spring tiles use a black character background and
-purple Color RAM foreground for their normal and compressed forms. Transition
-code moves the spring color together with its screen cells. Conveyors use green
-Color RAM foreground over black and invert the arrow pattern, producing a green
-tile with a black cut-out symbol without consuming another ECM background slot.
+The display mixes multicolor and hires characters, with ECM disabled. Normal
+platforms use the same red-brick/white-mortar texture as the frame; blank fragment
+rows remain black while the pattern moves upward one pixel at a time. Shared
+colors are black/white/gray; Color RAM=10 selects multicolor with red bricks.
+Disappearing platforms use three independent intact/cracked/broken glyph sets
+with Color RAM=10 throughout. Gray mortar progressively becomes black gaps;
+neither the red bricks nor the shared palette flash. Conveyors use Color RAM=14
+for white-and-blue multicolor textures. Spikes use white/green multicolor;
+purple springs, the white dial and text remain hires. Row transitions clear
+only the hidden playfield and draw contiguous spans from platform descriptions,
+using one material lookup per span and synchronizing occupied cells' Color RAM.
+Conveyor texture animation runs even without a passenger and on frames when the
+world does not move upward; its four horizontal phases repeat every 12 frames.
 
 The selected 24x21 hires character starts centered over the lowest initial
 platform. Elien is yellow, Ember is red, and Wasser is cyan. A paddle connected
@@ -90,12 +102,12 @@ to control port 1 controls horizontal movement:
 Normal movement is two pixels every three frames. The two extreme paddle ranges
 move two pixels every two frames, exactly 1.5 times the normal average speed.
 Movement remains clamped inside the playfield.
-The hardware border is black. Cyan characters draw an inset frame on rows 1/23
+The hardware border is black. Brick characters draw an inset frame on rows 1/23
 and columns 1/38, while column 29 separates the game area from the eight-column
 status panel at columns 30..37. `$d011` stays at the natural 25-row phase 3, so
 the full 200-pixel character matrix is visible and no border-gap sprite is
 required. `POTX:xxx` is rendered directly as eight fixed status-panel
-characters. A second fixed row displays `P:000000`; `P` means points and the
+characters. The score uses two fixed rows: `SCORE:` followed by `000000`. The
 six digits count distinct platforms reached. Each platform carries a claim flag
 that moves upward with its character row. The first airborne landing sets that
 flag and awards one point; bouncing or returning to the same platform does not.
@@ -157,18 +169,36 @@ The renderer combines:
   25-row matrix exactly covers the display window
 - runtime-updated fragment glyphs for pixel-smooth rectangular, spike, fade,
   spring, and conveyor platforms
-- a character-row transition after every eight pixels
+- row-indexed platform descriptions: start, width and canonical FULL code
+  (including fade/spring state), totaling 60 bytes; width zero marks an empty row
+- a hidden-playfield clear and descriptor-driven redraw at the two character
+  layout transitions; the six intermediate pixel steps still only update glyphs
 - two screen buffers at `$0400` and `$0c00`
-- native code at `$1d00-$27e4`
-- a 64-character custom character set at `$2800-$29ff`
-- SID player and pattern data at `$2a00-$2dc2`
+- native code and state at `$1d00-$27d5`
+- a writable 66-glyph mixed-mode output charset at `$2800-$2a0f`
+- SID player and pattern data at `$2a10-$2dd2`
 - sprite storage at `$3000-$313f`: Elien's four movement frames and the writable
   dial hand
-- player physics, spring and conveyor-platform code at `$3140-$37d4`
-- score-gated platform generation plus HP/damage code at `$3800-$39ed`
+- player physics, ceiling recovery and spring/conveyor code at `$3140-$3779`
+- ceiling drawing, platform generation and HP/damage code at `$3800-$39da`
 - the remaining eleven character frames at `$3a00-$3cbf`: Elien hurt plus all
   five Ember and five Wasser frames
-- title-selection code, prompt glyphs and character tables at `$3cc0-$3e8f`
+- title-selection code, prompt text and character tables at `$3cc0-$3e64`
+- graphics-only source charset at `$4000-$47ff`
+- uppercase text source charset at `$4800-$4fff`, imported from the teacher's font
+- material/collision tables, descriptor effect updates, conveyor animation and charset composition at `$5000-$5358`
+
+Each logical row holds at most one platform, separated from the next platform by
+blank rows. `draw_platform` records its description; coarse scrolling shifts
+descriptions with score claims, and fade/spring changes update the stored FULL
+code as well as both screen matrices. Collision still samples the visible
+matrix. Clearing a scene also clears descriptions, preventing old platforms
+from reappearing on the next round. Hidden matrices retain old contents until
+cleared; the fixed frame, ceiling, HUD and sprite pointers are never cleared by
+the playfield renderer. Glyph RAM and Color RAM remain shared, not double-buffered.
+
+The loop targets one update per PAL frame; polling does not catch up missed
+frames. CPU-cycle comparisons are not a substitute for VIC/IRQ timing checks.
 
 Gameplay enables only hardware sprites 0 (selected character) and 4 (dial
 hand). The title selector temporarily enables sprites 0..2 to preview the three
@@ -186,25 +216,37 @@ player physics, assets, and mutable state:
 src/
   main.s            program entry and frame orchestration
   constants.inc     hardware addresses and shared layout constants
+  charset_ids.inc   game glyph IDs and separate modal text codes
+  charset.inc       writable output charset and resource includes
+  graphics_charset.inc source 1: custom graphics only
+  text_charset.inc  source 2: imported uppercase font
+  charset_loader.inc range copies and scene-entry composition
   video.inc         scrolling, double buffering, modal screens, UI characters
+  platform_materials.inc fragments, colors, transition and collision lookup tables
   platforms.inc     PRNG and platform generation
+  platform_rows.inc row descriptions, hidden-playfield clear and span rendering
   input.inc         paddle/POTX sampling
   hud.inc           character POTX display and dial hand
   score.inc         first-landing score, claim rows and scroll-rate scheduler
   health.inc        HP rewards, decimal HUD and hazard recovery
   character_select.inc title selection, neutral check and character frame tables
   player.inc        movement, gravity, landing and spike collision
-  fade_platforms.inc disappearing-platform lifecycle and flashing
+  fade_platforms.inc disappearing-platform lifecycle and staged crumbling
   spring_platforms.inc spring compression, restoration and upward launch
-  conveyor_platforms.inc conveyor glyph transitions and modal-font restoration
+  conveyor_platforms.inc horizontal texture animation and vertical glyph fragments
   music.inc         raster IRQ, SID instruments and 16-bar music patterns
-  assets.inc        custom characters, sprite bitmaps and immutable tables
+  assets.inc        charset include, sprite bitmaps and immutable tables
   state.inc         mutable game state bytes
 ```
 
-`tools/analyze_music.py` and `tools/render_spectrogram.py` document the offline
-MP3-to-SID analysis step. They are development tools only and are not required
-to build or run the PRG.
+See [CHARSET_LAYOUT.md](CHARSET_LAYOUT.md) for the bilingual two-source charset
+design and slot maps. Gameplay imports only
+the HUD text it needs; modal screens use the complete basic uppercase text page.
+Both inputs ship inside the PRG; no additional disk load or raster split is used.
+
+The repository contains game source, font and sprite assets, build/launch
+scripts, and project documentation. Local tests, audio-analysis tools,
+presentations, archives, caches, and generated build output are excluded.
 
 See `ARCHITECTURE.md` for the call flow, memory map, sprite allocation, and
 cross-module invariants.
@@ -219,23 +261,27 @@ groups work from the same buildable source tree.
 双缓冲、平滑滚动、平台碰撞、paddle 输入、sprite 和 SID 中断音乐；源码内也已
 补充各子程序的输入、输出、寄存器破坏范围和关键硬件寄存器说明。
 
-Build directly with the cc65 toolchain:
+## Build and run
 
-```powershell
-New-Item -ItemType Directory -Force build | Out-Null
-& 'D:\C64Tools\cc65-snapshot-win64\bin\ca65.exe' src\main.s -g `
-  -l build\nsshaft-c128.lst -o build\nsshaft-c128.o
-& 'D:\C64Tools\cc65-snapshot-win64\bin\ld65.exe' -C c128-prg.cfg `
-  -Ln build\nsshaft-c128.lbl -m build\nsshaft-c128.map `
-  -o build\nsshaft-c128.prg build\nsshaft-c128.o
-```
-
-On Windows, build and run with:
+Install the [cc65 toolchain](https://cc65.github.io/getting-started.html) and
+[VICE](https://vice-emu.sourceforge.io/). Use the C128 emulator (`x128`) in PAL
+mode. Add the cc65 `bin` directory and VICE `bin` directory to PATH, then run:
 
 ```powershell
 .\build.ps1
 .\run-x128.ps1
 ```
+
+Alternatively, supply your own installation paths (no fixed drive is required):
+
+```powershell
+.\build.ps1 -Cc65Bin 'C:\cc65\bin'
+.\run-x128.ps1 -Cc65Bin 'C:\cc65\bin' -VicePath 'C:\VICE\bin\x128.exe'
+```
+
+The scripts also accept the `CC65_BIN` and `VICE_X128` environment variables.
+The output is `build/nsshaft-c128.prg`; build output is generated locally.
+All font data required for assembly is included under `assets/fonts/`.
 
 On a real C128, use the 40-column video output, load the PRG normally from
 BASIC 7, and run it:

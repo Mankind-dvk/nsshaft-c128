@@ -2,8 +2,8 @@
 ; 平台生成与伪随机序列
 ; ---------------------------------------------------------------------------
 ; 在当前游戏区域宽度内生成普通、尖刺、消失、弹簧和左右传送平台。平台
-; 类型、宽度和水平位置全部由同一个 16 位状态驱动，因此只要启动种子相同，
-; 就能完整复现整个平台序列。
+; 类型、宽度和水平位置由同一个 16 位状态驱动；相同种子、难度变化和调用顺序
+; 可以复现平台序列。draw_platform 同时登记用于转场重绘的平台描述。
 ;
 ; 公共入口：
 ;   seed_platforms、seed_random、randomize_platform、draw_platform。
@@ -36,7 +36,7 @@ seed_platforms:
     cpx #SEED_PLATFORM_COUNT-1
     bne @draw
 .ifdef FADE_PLATFORM_TEST
-    ; 自动化版本让出生平台直接覆盖消失平台的激活、闪烁和删除流程。
+    ; 自动化版本让出生平台直接覆盖虚化平台的激活、破碎和删除流程。
     lda #PLATFORM_TYPE_FADE
 .elseif .defined(SPRING_PLATFORM_TEST)
     ; 自动化版本把出生平台设为弹簧，便于直接观察压缩和弹跳流程。
@@ -66,9 +66,9 @@ seed_platforms:
     bne @loop
     rts
 
-; 使用机器启动后持续运行的时钟，以及已加载程序之外的 RAM 内容生成
-; PRNG 种子。如果混合后的所有位恰好全部抵消，则使用非零后备种子。
-; EN: Mix clocks, timers, raster, and RAM into a nonzero 16-bit PRNG state.
+; 混合时钟、CIA 定时器和光栅生成种子。两个 RAM 字节属于已加载的程序，
+; 只是固定混合值，不是开机随机 RAM；KERNAL 时钟在游戏接管 IRQ 后不再更新。
+; EN: Mix hardware timing and loaded bytes; fall back to a nonzero seed.
 seed_random:
     ; 输出：random_state_low/high 得到非零的 16 位种子。
     ; EOR 混合多个会随开机/装载时刻变化的字节；它不是密码学随机数，只用于
@@ -105,13 +105,8 @@ seed_random:
 ; 16 位 Galois LFSR，多项式为 $b400；每次推进八位后，在 A 中返回混合字节。
 ; EN: Advance the 16-bit Galois LFSR by eight bits; return high XOR low in A.
 random_byte:
-    ; 旧实现每次调用只推进 1 bit，却把结果当作一个全新的随机字节使用。
-    ; 相邻返回值因此共享七位，platform_type 再取低三位时会出现明显的方向
-    ; 连续性。这里连续执行八次反馈，使相邻返回字节不再是简单的一位平移。
-    ;
-    ; X 必须保持不变，因为 seed_platforms 用 X 遍历初始平台地址表；Y 是本
-    ; 例程允许破坏的临时八次计数器。最终把 high/low 异或，避免调用者总是
-    ; 只观察 LFSR 状态的一半。状态推进仍是同一条 65535 周期序列。
+    ; 每次推进八位，减少相邻输出的位重叠；返回值混合状态的高、低字节。
+    ; 保留 seed_platforms 遍历地址表所用的 X；Y 用作八次反馈的计数器。
     ldy #8
 @step:
     lsr random_state_high
@@ -176,7 +171,7 @@ update_platform_generation_level:
     sta platform_generation_level
     rts
 
-; 平台宽度为 7..12 个字符。平台始终位于青色外框与分隔条之间，绝不会
+; 平台宽度为 7..12 个字符。平台始终位于白色外框与分隔条之间，绝不会
 ; 覆盖 UI 字符。
 ; EN: Produce unbiased width/start plus a weighted, score-gated platform type.
 randomize_platform:
@@ -288,24 +283,15 @@ platform_type_pool_end:
 draw_platform:
     ; 输入：ROW_PTR 指向目标字符行，platform_start/width/type 已准备好。
     ; 输出：写目标屏幕缓冲区；同时写共享 Color RAM。弹簧使用紫色前景，
-    ; 两种传送平台使用绿色前景，其他平台保持黑色前景作为 ECM 形状遮罩。
+    ; 两种传送平台使用白蓝多色纹理；砖块和虚化平台也通过 bit 3 选择多色显示。
     ; COLOR_PTR 的构造利用 SCREEN_A、SCREEN_B 与 Color RAM 低十位布局相同。
+    jsr record_platform_row
     ldy platform_type
     lda platform_chars, y
     sta selected_platform_char
 
-    ; 普通、尖刺和消失平台把 Color RAM 保持为黑色遮罩。弹簧改用紫色；
-    ; 左右传送平台的字形位 1 使用绿色，位 0 露出黑色镂空箭头。
-    lda #COLOR_BLACK
-    cpy #PLATFORM_TYPE_SPRING
-    bne @check_conveyor
-    lda #COLOR_PURPLE
-    bne @color_ready
-@check_conveyor:
-    cpy #PLATFORM_TYPE_CONVEYOR_LEFT
-    bcc @color_ready
-    lda #COLOR_GREEN
-@color_ready:
+    ; EN: Lookup preserves X, which seed_platforms uses as its row index.
+    lda platform_colors, y
     sta selected_platform_color
 
     lda ROW_PTR

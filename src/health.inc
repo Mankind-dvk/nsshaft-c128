@@ -3,19 +3,17 @@
 ; ---------------------------------------------------------------------------
 ; 每获得三个“首次到达新平台”的分数增加 1 HP，分数不会被兑换或扣除。尖刺
 ; 接触也先计分，因此第三分若来自尖刺，新增加的 HP 可以立即吸收这次伤害。HP
-; 表示可吸收的伤害次数：尖刺和顶框先尝试消耗 1 HP；HP 为 0 时才请求
-; game over。掉到底部不经过本模块，仍由 player.inc 直接结束游戏。
+; 表示可吸收的普通尖刺平台或顶部倒尖刺伤害次数；HP 为 0 时才请求 game over。
+; 掉到底部不经过本模块，无论 HP 多少都直接结束游戏。顶部接触不计分。
 ;
 ; 伤害成功吸收后必须立刻离开危险接触面，否则下一帧会再次扣血。尖刺给予
-; 一个向上反弹速度；顶框把 sprite 放回框内八像素并清除平台支撑，使人物
-; 向下坠落。两种处理都清除旧的垂直/平台效果状态。
+; 一个向上反弹速度，顶部倒尖刺则将人物下移脱离；两者都清除旧的平台状态。
 ;
 ; English summary:
 ;   Every three newly claimed platforms award one persistent HP without reducing
 ;   score. A spike scores before damage, so a newly earned HP may absorb that
-;   same contact. Spikes bounce the player; the top frame drops the player back
-;   into the shaft after consuming HP. Zero HP turns either hazard into game over;
-;   falling through the bottom remains immediately fatal.
+;   same contact. Both spike types consume HP: platform spikes bounce upward,
+;   ceiling spikes detach and drop the player. Only falling bypasses HP.
 
 .segment "EXTCODE"
 
@@ -75,25 +73,6 @@ consume_health_or_game_over:
 @fatal:
     jsr request_game_over
     clc
-    rts
-
-; EN: Spend HP for top contact, detach from support, and drop inside the shaft.
-handle_top_damage:
-    jsr consume_health_or_game_over
-    bcc @done
-    jsr cancel_spring_platform
-    lda #0
-    sta player_on_platform
-    sta player_on_fade_platform
-    sta player_on_spring
-    sta player_fall_fraction
-    sta player_fall_velocity
-    sta player_rise_velocity
-    sta conveyor_move_counter
-    lda #PLAYER_TOP_GAME_OVER_Y+TOP_DAMAGE_DROP_PIXELS
-    sta player_y
-    sta VIC_SPRITE_0_Y
-@done:
     rts
 
 ; EN: Spend HP for spike contact and bounce upward to prevent repeat damage.
@@ -160,3 +139,28 @@ update_health_display:
     rts
 
 .assert * <= PLAYER_HURT_ADDRESS, error, "HP code overlaps hurt sprite block"
+
+; EXTCODE 紧邻受伤 sprite，顶部恢复放在尚有空间的 GAMEPLAY 段；调用方式不变。
+; EN: Keep ceiling recovery in GAMEPLAY to avoid overflowing EXTCODE into sprites.
+.segment "GAMEPLAY"
+
+; 头顶碰到尖端后只扣一次血：取消压缩弹簧、解除支撑、终止上升，再下移 8 像素。
+; 不能只改 Y 而保留支撑/弹簧状态，否则下帧又会被托举或发射回尖刺。
+; EN: Absorb one ceiling hit, cancel spring/support/momentum, and drop below the tips.
+handle_ceiling_damage:
+    jsr consume_health_or_game_over
+    bcc @done
+    jsr cancel_spring_platform
+    lda #0
+    sta player_on_platform
+    sta player_on_fade_platform
+    sta player_on_spring
+    sta player_fall_fraction
+    sta player_fall_velocity
+    sta player_rise_velocity
+    sta conveyor_move_counter
+    lda #(PLAYER_CEILING_CONTACT_Y+CEILING_DAMAGE_DROP_PIXELS)
+    sta player_y
+    sta VIC_SPRITE_0_Y
+@done:
+    rts

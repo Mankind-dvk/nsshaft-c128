@@ -85,7 +85,7 @@ update_potx_display:
     lda decimal_work
     sta potx_ones
 
-    ; 字符码 4..13 是 0..9。UI 不使用平台碎片更新区域，因此这些字符
+    ; 游戏字符码 40..49 是从第二源库抽取的 0..9；不属于平台碎片区，因此这些字符
     ; 始终固定在右上角。
     lda potx_hundreds
     clc

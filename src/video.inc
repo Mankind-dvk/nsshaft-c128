@@ -11,14 +11,14 @@
 ;   initialize_ui。
 ;
 ; 双缓冲模型：active_screen 指出的矩阵正在被 VIC 显示，所有大规模转场先写
-; 另一张隐藏矩阵，完成后只改一次 $d018。Color RAM 没有第二份，所以弹簧
-; 紫色只在对应字符确实移动时同步更新，不能像屏幕矩阵那样整页翻转。
+; 另一张隐藏矩阵，完成后只改一次 $d018。Color RAM 没有第二份，所以各类
+; 平台的颜色只在字符转场时同步更新，不能像屏幕矩阵那样整页翻转。
 ;
 ; English summary:
 ;   Owns double-buffered VIC-IIe text rendering, dynamic glyph scroll phases,
 ;   fixed UI construction, and modal screens. active_screen is visible; large
 ;   transitions are written to the other matrix and exposed with one $d018
-;   write. Color RAM is shared, so colored spring/conveyor cells are moved
+;   write. Color RAM is shared, so occupied platform cells are recolored
 ;   explicitly. Software fine_scroll never changes the fixed HUD's $d011 phase.
 
 .segment "CODE"
@@ -34,6 +34,11 @@ scroll_one_pixel_up:
     dec player_y
     lda player_y
     sta VIC_SPRITE_0_Y
+    ; 台阶托举也要在本次像素步立即判定，不能等下一帧再扣血或检测。
+    ; EN: Handle ceiling damage in the same carried pixel, not one frame later.
+    cmp #(PLAYER_CEILING_CONTACT_Y+1)
+    bcs @scroll_playfield
+    jmp handle_ceiling_damage
 
 @scroll_playfield:
     lda fine_scroll
@@ -61,7 +66,7 @@ scroll_one_pixel_up:
     jmp flip_hidden_screen
 
 ; VIC 垂直滚动寄存器始终保持自然相位 3，使 25 行字符完整覆盖可视区。
-; 普通/未触发灰色平台共用一对矩形碎片；已触发平台使用另一对矩形碎片，
+; 普通砖台阶和虚化平台的三级砖纹各用独立碎片，
 ; 尖刺、弹簧和左右传送平台各自生成保持图案形状的动态碎片。
 ; EN: Rebuild every platform's runtime UPPER/LOWER bitmaps for fine_scroll.
 update_fragment_glyphs:
@@ -77,31 +82,10 @@ update_fragment_glyphs:
     sbc fine_scroll
     sta fragment_count
 
-    ldy #0
-@normal_masks:
-    cpy fragment_split
-    bcc @normal_top
-    lda #$00
-    sta normal_upper_glyph, y
-    sta fade_active_upper_glyph, y
-    lda #$ff
-    sta normal_lower_glyph, y
-    sta fade_active_lower_glyph, y
-    jmp @normal_next
-@normal_top:
-    lda #$ff
-    sta normal_upper_glyph, y
-    sta fade_active_upper_glyph, y
-    lda #$00
-    sta normal_lower_glyph, y
-    sta fade_active_lower_glyph, y
-@normal_next:
-    iny
-    cpy #8
-    bne @normal_masks
+    jsr update_brick_and_fade_fragments
 
     ldy #0
-    lda #$ff
+    lda #$00
 @clear_spikes:
     sta spike_upper_glyph, y
     sta spike_lower_glyph, y
@@ -135,7 +119,7 @@ update_fragment_glyphs:
 prepare_screen_b_from_a:
 copy_active_to_hidden:
     ; 输入：active_screen。输出：隐藏屏成为可见屏的 1000 字节完整副本。
-    ; 主要在新游戏开始时调用；运行中的转场只复制游戏区所需单元格。
+    ; 主要在新游戏开始时调用；运行中的转场改为按平台描述重建隐藏游戏区。
     jsr set_screen_copy_pointers
     ldx #SCREEN_ROWS
 @row:
@@ -184,10 +168,9 @@ advance_copy_pointers:
 @done:
     rts
 
-; EN: Advance source, destination, and look-ahead row pointers together.
+; EN: Advance the paired screen pointers and the UI color-row pointer together.
 advance_transition_pointers:
-    ; 在 advance_copy_pointers 基础上，再推进 NEXT_ROW_PTR。开始转场时它
-    ; 始终指向源行的下一行，用来判断空白格下方是否有完整平台。
+    ; UI 构建时 NEXT_ROW_PTR 指向 Color RAM；三份行指针同时前进。
     jsr advance_copy_pointers
     clc
     lda NEXT_ROW_PTR
@@ -198,309 +181,20 @@ advance_transition_pointers:
 @done:
     rts
 
-; 屏幕 A/B 的地址低十位都与 Color RAM 对应，因此保留低字节，并把高字节
-; 的低两位映射到 $d8..$db，即可得到当前目标行的颜色指针。
-; EN: Map DEST_PTR's low 10 address bits to the corresponding Color RAM cell.
-set_color_pointer_from_dest:
-    ; 输入：DEST_PTR 指向某个屏幕行。输出：COLOR_PTR 指向同一行的 Color RAM。
-    lda DEST_PTR
-    sta COLOR_PTR
-    lda DEST_PTR+1
-    and #%00000011
-    ora #>COLOR_RAM
-    sta COLOR_PTR+1
-    rts
-
-; EN: Add one 40-byte row to COLOR_PTR.
-advance_color_pointer:
-    ; COLOR_PTR += 40；与目标屏幕行保持同步。
-    clc
-    lda COLOR_PTR
-    adc #SCREEN_COLUMNS
-    sta COLOR_PTR
-    bcc @done
-    inc COLOR_PTR+1
-@done:
-    rts
-
-; 相位 1 将每个完整平台替换为下部碎片，并在上一字符行插入对应的上部碎片。
-; EN: Convert FULL cells to LOWER and insert UPPER cells in the hidden buffer.
+; EN: Rebuild hidden LOWER/UPPER spans from platform descriptions, not screen cells.
 start_fragment_transition:
-    ; 相位 7->6 时调用。对每个游戏区单元格执行：
-    ;   当前行完整平台 -> 当前行 LOWER；
-    ;   当前行空白且下一行有完整平台 -> 当前行 UPPER；
-    ;   其他字符 -> 原样或空白。
-    ; 结果写隐藏屏，循环结束后由调用者 flip_hidden_screen 一次性显示。
-    jsr set_screen_copy_pointers
-    ; 青色框占据第 1/23 行，平台只允许在第 2..22 行滚动。跳过前两行也
-    ; 会让最上方平台自然消失在框线后面，而不是覆盖顶框。
-    jsr advance_copy_pointers
-    jsr advance_copy_pointers
-    clc
-    lda ROW_PTR
-    adc #SCREEN_COLUMNS
-    sta NEXT_ROW_PTR
-    lda ROW_PTR+1
-    adc #0
-    sta NEXT_ROW_PTR+1
-    jsr set_color_pointer_from_dest
+    jmp render_hidden_platforms
 
-    ldx #PLAYFIELD_ROW_COUNT
-@row:
-    ldy #PLAYFIELD_LAST_COLUMN
-@column:
-    lda (ROW_PTR), y
-    beq @check_next_row
-    cmp #CHAR_PLATFORM_FULL
-    beq @normal_lower
-    cmp #CHAR_SPIKE_TRIANGLE
-    beq @spike_lower
-    cmp #CHAR_FADE_FULL
-    beq @fade_lower
-    cmp #CHAR_FADE_ACTIVE_RED_FULL
-    beq @fade_active_red_lower
-    cmp #CHAR_FADE_ACTIVE_GRAY_FULL
-    beq @fade_active_gray_lower
-    cmp #CHAR_SPRING_FULL
-    beq @spring_lower
-    cmp #CHAR_SPRING_COMPRESSED_FULL
-    beq @spring_compressed_lower
-    cmp #CHAR_CONVEYOR_LEFT_FULL
-    beq @conveyor_left_lower
-    cmp #CHAR_CONVEYOR_RIGHT_FULL
-    beq @conveyor_right_lower
-    ; 游戏区中若以后加入其他固定字符，原样复制到隐藏屏。
-    jmp @store
-
-@check_next_row:
-    cpx #1
-    bne @read_next_row
-    jmp @store
-@read_next_row:
-    lda (NEXT_ROW_PTR), y
-    beq @blank
-    cmp #CHAR_PLATFORM_FULL
-    beq @normal_upper
-    cmp #CHAR_SPIKE_TRIANGLE
-    beq @spike_upper
-    cmp #CHAR_FADE_FULL
-    beq @fade_upper
-    cmp #CHAR_FADE_ACTIVE_RED_FULL
-    beq @fade_active_red_upper
-    cmp #CHAR_FADE_ACTIVE_GRAY_FULL
-    beq @fade_active_gray_upper
-    cmp #CHAR_SPRING_FULL
-    beq @spring_upper
-    cmp #CHAR_SPRING_COMPRESSED_FULL
-    beq @spring_compressed_upper
-    cmp #CHAR_CONVEYOR_LEFT_FULL
-    beq @conveyor_left_upper
-    cmp #CHAR_CONVEYOR_RIGHT_FULL
-    beq @conveyor_right_upper
-@blank:
-    lda #CHAR_BLANK
-    beq @store
-@normal_lower:
-    lda #CHAR_NORMAL_LOWER
-    bne @store
-@spike_lower:
-    lda #CHAR_SPIKE_LOWER
-    bne @store
-@fade_lower:
-    lda #CHAR_FADE_LOWER
-    bne @store
-@fade_active_red_lower:
-    lda #CHAR_FADE_ACTIVE_RED_LOWER
-    bne @store
-@fade_active_gray_lower:
-    lda #CHAR_FADE_ACTIVE_GRAY_LOWER
-    bne @store
-@spring_lower:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_LOWER
-    bne @store
-@spring_compressed_lower:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_COMPRESSED_LOWER
-    bne @store
-@conveyor_left_lower:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_LEFT_FULL
-    bne @store
-@conveyor_right_lower:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_RIGHT_FULL
-    bne @store
-@normal_upper:
-    lda #CHAR_NORMAL_UPPER
-    bne @store
-@spike_upper:
-    lda #CHAR_SPIKE_UPPER
-    bne @store
-@fade_upper:
-    lda #CHAR_FADE_UPPER
-    bne @store
-@fade_active_red_upper:
-    lda #CHAR_FADE_ACTIVE_RED_UPPER
-    bne @store
-@fade_active_gray_upper:
-    lda #CHAR_FADE_ACTIVE_GRAY_UPPER
-    bne @store
-@spring_upper:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_UPPER
-    bne @store
-@spring_compressed_upper:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_COMPRESSED_UPPER
-    bne @store
-@conveyor_left_upper:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_LEFT_UPPER
-    bne @store
-@conveyor_right_upper:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_RIGHT_UPPER
-@store:
-    sta (DEST_PTR), y
-@next_column:
-    dey
-    cpy #PLAYFIELD_FIRST_COLUMN
-    bcc @row_done
-    jmp @column
-@row_done:
-    jsr advance_transition_pointers
-    jsr advance_color_pointer
-    dex
-    beq @done
-    jmp @row
-@done:
-    rts
-
-; 相位 7 完成后，上部碎片在上移一行的位置变为完整字符，下部碎片消失；
+; fine_scroll 从 0 回到 7 时，上部碎片在上移一行的位置变为完整字符，下部碎片消失；
 ; 此时可以从画面底部加入新平台。
-; EN: Promote UPPER to FULL, erase LOWER, and generate the new bottom row.
+; EN: Shift descriptions, rebuild FULL spans, and generate the new bottom row.
 complete_fragment_transition:
-    ; 相位 0->7 时调用。UPPER 在上移后的字符行变回 FULL，LOWER 清为空白，
-    ; 从而完成“像素滚动八次等于字符行上移一次”。随后重建最底逻辑行。
-    jsr set_screen_copy_pointers
-    jsr advance_copy_pointers
-    jsr advance_copy_pointers
-    jsr set_color_pointer_from_dest
-    ldx #PLAYFIELD_ROW_COUNT
-@row:
-    ldy #PLAYFIELD_LAST_COLUMN
-@column:
-    lda (ROW_PTR), y
-    bne @classify
-    jmp @store
-@classify:
-    cmp #CHAR_NORMAL_UPPER
-    beq @normal_full
-    cmp #CHAR_SPIKE_UPPER
-    beq @spike_full
-    cmp #CHAR_FADE_UPPER
-    beq @fade_full
-    cmp #CHAR_FADE_ACTIVE_RED_UPPER
-    beq @fade_active_red_full
-    cmp #CHAR_FADE_ACTIVE_GRAY_UPPER
-    beq @fade_active_gray_full
-    cmp #CHAR_SPRING_UPPER
-    beq @spring_full
-    cmp #CHAR_SPRING_COMPRESSED_UPPER
-    beq @spring_compressed_full
-    cmp #CHAR_CONVEYOR_LEFT_UPPER
-    beq @conveyor_left_full
-    cmp #CHAR_CONVEYOR_RIGHT_UPPER
-    beq @conveyor_right_full
-    cmp #CHAR_NORMAL_LOWER
-    beq @blank
-    cmp #CHAR_SPIKE_LOWER
-    beq @blank
-    cmp #CHAR_FADE_LOWER
-    beq @blank
-    cmp #CHAR_FADE_ACTIVE_RED_LOWER
-    beq @blank
-    cmp #CHAR_FADE_ACTIVE_GRAY_LOWER
-    beq @blank
-    cmp #CHAR_SPRING_LOWER
-    beq @spring_blank
-    cmp #CHAR_SPRING_COMPRESSED_LOWER
-    beq @spring_blank
-    cmp #CHAR_CONVEYOR_LEFT_FULL
-    beq @conveyor_blank
-    cmp #CHAR_CONVEYOR_RIGHT_FULL
-    beq @conveyor_blank
-    bne @store
-@spring_blank:
-    lda #COLOR_BLACK
-    sta (COLOR_PTR), y
-    beq @blank
-@conveyor_blank:
-    lda #COLOR_BLACK
-    sta (COLOR_PTR), y
-@blank:
-    lda #CHAR_BLANK
-    beq @store
-@normal_full:
-    lda #CHAR_PLATFORM_FULL
-    bne @store
-@spike_full:
-    lda #CHAR_SPIKE_TRIANGLE
-    bne @store
-@fade_full:
-    lda #CHAR_FADE_FULL
-    bne @store
-@fade_active_red_full:
-    lda #CHAR_FADE_ACTIVE_RED_FULL
-    bne @store
-@fade_active_gray_full:
-    lda #CHAR_FADE_ACTIVE_GRAY_FULL
-    bne @store
-@spring_full:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_FULL
-    bne @store
-@spring_compressed_full:
-    lda #COLOR_PURPLE
-    sta (COLOR_PTR), y
-    lda #CHAR_SPRING_COMPRESSED_FULL
-    bne @store
-@conveyor_left_full:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_LEFT_FULL
-    bne @store
-@conveyor_right_full:
-    lda #COLOR_GREEN
-    sta (COLOR_PTR), y
-    lda #CHAR_CONVEYOR_RIGHT_FULL
-@store:
-    sta (DEST_PTR), y
-@next_column:
-    dey
-    cpy #PLAYFIELD_FIRST_COLUMN
-    bcc @row_done
-    jmp @column
-@row_done:
-    jsr advance_copy_pointers
-    jsr advance_color_pointer
-    dex
-    beq @rows_done
-    jmp @row
-@rows_done:
+    ; Shift canonical rows alongside score claims, then rebuild FULL spans.
+    jsr advance_platform_rows
+    jsr render_hidden_platforms
 
     ; 传送平台的 FULL 槽在过渡阶段兼任 LOWER；在底部生成新平台和翻屏前
-    ; 恢复完整箭头，否则新字符会短暂显示成只剩一行的碎片。
+    ; 恢复当前水平相位的完整纹理，不能将表面动画重置回源图案。
     jsr restore_conveyor_full_glyphs
 
     lda active_screen
@@ -559,16 +253,10 @@ generate_bottom_row:
 
 ; 不滚动的开始与游戏结束画面 ---------------------------------------------
 
-; EN: Restore modal glyphs, clear both matrices, and draw the title screen.
+; EN: Load the full text page, clear both matrices, and draw the title screen.
 show_start_screen:
     ; 模态画面：关闭 sprite、固定显示 SCREEN_A、清两屏，再写标题和提示。
-    jsr restore_modal_font_glyphs
-    lda #0
-    sta VIC_SPRITE_ENABLE
-    SHOW_SCREEN SCREEN_A_D018
-    lda #VIC_CONTROL_1_TEXT
-    sta VIC_CONTROL_1
-    jsr clear_screens_and_colors
+    jsr prepare_modal_screen
 
     ldx #0
 @title:
@@ -579,18 +267,13 @@ show_start_screen:
     inx
     cpx #8
     bne @title
-    jmp draw_action_prompt
+    jsr draw_action_prompt
+    jmp enable_charset_display
 
-; EN: Restore modal glyphs, clear gameplay, and draw the game-over screen.
+; EN: Load the full text page, clear gameplay, and draw the game-over screen.
 show_game_over_screen:
     ; 与开始画面相同，但标题使用红色。游戏世界不会在此期间继续滚动。
-    jsr restore_modal_font_glyphs
-    lda #0
-    sta VIC_SPRITE_ENABLE
-    SHOW_SCREEN SCREEN_A_D018
-    lda #VIC_CONTROL_1_TEXT
-    sta VIC_CONTROL_1
-    jsr clear_screens_and_colors
+    jsr prepare_modal_screen
 
     ldx #0
 @title:
@@ -605,7 +288,8 @@ show_game_over_screen:
     ; 游戏画面和模态画面共用硬件 sprite 0。清屏已经清除了指针表，所以要在
     ; 此处重新写入 hurt 块号、固定坐标和单色寄存器，然后只启用 sprite 0。
     jsr show_game_over_player
-    jmp draw_action_prompt
+    jsr draw_action_prompt
+    jmp enable_charset_display
 
 ; EN: Center the hurt frame between GAME OVER and PRESS FIRE using sprite 0.
 show_game_over_player:
@@ -680,12 +364,20 @@ action_button_pressed:
 
 ; EN: Clear both 1 KiB matrices and the complete 1 KiB Color RAM region.
 clear_screens_and_colors:
+    ldy #CHAR_BLANK
+; EN: Reset platform descriptions; Y is the fill code (game 0 or text space 32).
+clear_screens_with_character:
     ; X 从 0 自增到溢出，恰好遍历 256 个偏移；四个页面合计覆盖每个 1 KB
-    ; 屏幕区和 Color RAM。最后 24 个非可见字节也清零，包含 sprite 指针表，
+    ; 屏幕区和 Color RAM。最后 24 个非可见字节也填充，包含 sprite 指针表，
     ; 所以后续 initialize_player/dashboard 必须重新写指针。
+    tya
+    pha
+    jsr reset_platform_rows
+    pla
+    tay
     ldx #0
 @loop:
-    lda #CHAR_BLANK
+    tya
     sta SCREEN_A+$000, x
     sta SCREEN_A+$100, x
     sta SCREEN_A+$200, x
@@ -704,12 +396,12 @@ clear_screens_and_colors:
     bne @loop
     rts
 
-; 参考旧版 NS-Shaft 的固定字符框：硬件边框为黑色，屏幕第 1/23 行与
-; 第 1/38 列组成青色外框，第 29 列分隔游戏区和八列状态栏。第 0/24 行
+; 固定字符框：硬件边框为黑色，屏幕第 1/23 行与第 1/38 列组成砖纹外框，
+; 第 29 列分隔游戏区和八列状态栏。倒尖刺固定在第 2 行游戏区；第 0/24 行
 ; 以及第 0/39 列保留黑色，形成参考图中的外侧留白。
-; EN: Draw the cyan frame/divider, POTX area, and fixed character dial.
+; EN: Draw the brick frame/divider, fixed character dial and white/green ceiling spikes.
 initialize_ui:
-    ; 输出：两张屏幕都有完全相同的青色框、分隔列、POTX 区和字符表盘。
+    ; 输出：两张屏幕都有相同的砖纹框、分隔列、POTX 区、字符表盘和倒尖刺。
     ; 水平线适合绝对地址+X；垂直线适合三个行指针+固定 Y 列，这展示了两种
     ; 常见的 6502 屏幕遍历方式。
     ; 先画上下两条水平框线。
@@ -718,7 +410,7 @@ initialize_ui:
     lda #CHAR_UI_FRAME
     STORE_SCREEN_PAIR UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
     STORE_SCREEN_PAIR UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
-    lda #COLOR_CYAN
+    lda #UI_FRAME_COLOR
     sta COLOR_RAM+UI_FRAME_TOP_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
     sta COLOR_RAM+UI_FRAME_BOTTOM_ROW*SCREEN_COLUMNS+UI_FRAME_LEFT_COLUMN, x
     inx
@@ -738,21 +430,21 @@ initialize_ui:
     lda #CHAR_UI_FRAME
     sta (ROW_PTR), y
     sta (DEST_PTR), y
-    lda #COLOR_CYAN
+    lda #UI_FRAME_COLOR
     sta (NEXT_ROW_PTR), y
 
     ldy #UI_DIVIDER_COLUMN
     lda #CHAR_UI_FRAME
     sta (ROW_PTR), y
     sta (DEST_PTR), y
-    lda #COLOR_CYAN
+    lda #UI_FRAME_COLOR
     sta (NEXT_ROW_PTR), y
 
     ldy #UI_FRAME_RIGHT_COLUMN
     lda #CHAR_UI_FRAME
     sta (ROW_PTR), y
     sta (DEST_PTR), y
-    lda #COLOR_CYAN
+    lda #UI_FRAME_COLOR
     sta (NEXT_ROW_PTR), y
 
     jsr advance_transition_pointers
@@ -788,7 +480,7 @@ initialize_ui:
     inx
     cpx #8
     bne @dial_row_3
-    rts
+    jmp draw_ceiling_spikes
 
 ; EN: Add one 40-byte row to ROW_PTR only.
 advance_row_pointer:
@@ -800,4 +492,19 @@ advance_row_pointer:
     bcc @done
     inc ROW_PTR+1
 @done:
+    rts
+
+; 固定危险区仅在建场景时绘制；两种滚动过程都不写这一行，不占 sprite。
+; EN: Draw once into both matrices, using the same white/green multicolor palette.
+.segment "EXTCODE"
+draw_ceiling_spikes:
+    ldx #PLAYFIELD_FIRST_COLUMN
+@column:
+    lda #CHAR_CEILING_SPIKE
+    STORE_SCREEN_PAIR CEILING_SPIKE_ROW*SCREEN_COLUMNS, x
+    lda #SPIKE_CELL_COLOR
+    sta COLOR_RAM+CEILING_SPIKE_ROW*SCREEN_COLUMNS, x
+    inx
+    cpx #PLAYFIELD_LAST_COLUMN+1
+    bne @column
     rts

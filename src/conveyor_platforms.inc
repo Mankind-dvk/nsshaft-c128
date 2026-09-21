@@ -1,33 +1,41 @@
 ; ---------------------------------------------------------------------------
 ; 左/右传送平台的动态字形
 ; ---------------------------------------------------------------------------
-; 传送平台本身不做水平位移；连续的“<”或“>”表示传送方向，人物站在上面时
-; 由 player.inc 每三帧水平推动两像素。平台仍与其他类型一起向上平滑滚动。
+; 平台边界不水平位移，白蓝表面每三帧向左/右循环移动两显示像素。
+; 人物站在上面时由 player.inc 每三帧推动两像素；平台整体仍向上平滑滚动。
 ;
-; ECM 只能提供四个全局背景色，当前已经分配给黑、白、红、灰。为了得到
-; “绿色底、黑色镂空箭头”，传送平台改用普通黑色背景和绿色 Color RAM：
-; 字形位 1 显示绿色，位 0 露出黑色背景。
+; Color RAM=14（bit 3=1），多色位对 01=白、11=蓝、00=黑色裁切区。
+; 水平动画只改写独立 RAM 图案，再按当前垂直相位生成显示字形。
 ;
-; 64 字符 ECM 字符集没有六个空闲槽。本模块在游戏画面期间复用 N、S、-、V
-; 四个标题字形槽：每个方向只需要 FULL/LOWER 共用槽和 UPPER 槽。粗滚动
-; 完成后把共用槽恢复成完整箭头；回到菜单前再恢复四个原始文字字形。
+; 每个方向只需要 FULL/LOWER 共用槽和 UPPER 槽，合计四槽而非六槽。
+; 完整纹理在本体区 5/6，UPPER 在碎片区 18/19；粗滚动保留当前水平相位。
+; 菜单不借用任何平台槽；charset_loader.inc 在场景入口装载完整文字页。
 ;
 ; 公共入口：
 ;   initialize_conveyor_platforms、update_conveyor_fragment_glyphs、
-;   restore_conveyor_full_glyphs、restore_modal_font_glyphs。
+;   restore_conveyor_full_glyphs、update_conveyor_animation。
 ;
 ; English summary:
-;   Builds green left/right cut-out arrow glyphs and their smooth-scroll
-;   fragments. Each FULL slot doubles as LOWER. Gameplay temporarily reuses the
-;   N/S/-/V font slots; modal entry restores those four glyphs from the immutable
-;   table below. Player movement itself is implemented in player.inc.
+;   White/blue belts rotate one multicolor pixel left/right every three frames,
+;   independently of player support. Each FULL slot doubles as LOWER; separate
+;   RAM patterns preserve horizontal phase across vertical fragment rebuilds.
 
 .segment "GAMEPLAY"
 
-; EN: Install full arrow glyphs and clear both UPPER runtime slots for gameplay.
+; EN: Reset horizontal phase, install FULL glyphs and clear both UPPER slots.
 initialize_conveyor_platforms:
-    ; 新游戏已经清空两张屏幕，所以此时覆盖 N/S/-/V 不会破坏可见文字。
+    ; 新游戏已经清空两张屏幕，可安全重置上局留下的传送平台碎片。
     ; 完整平台使用 LEFT/RIGHT_FULL；两个 UPPER 槽等第一次滚动时再生成。
+    lda #CONVEYOR_ANIMATION_FRAMES
+    sta conveyor_animation_counter
+    ldy #7
+@reset_patterns:
+    lda conveyor_left_source_glyph, y
+    sta conveyor_left_pattern, y
+    lda conveyor_right_source_glyph, y
+    sta conveyor_right_pattern, y
+    dey
+    bpl @reset_patterns
     jsr restore_conveyor_full_glyphs
     ldy #7
     lda #$00
@@ -38,10 +46,10 @@ initialize_conveyor_platforms:
     bpl @clear_upper
     rts
 
-; 根据 video.inc 算出的 fragment_split/fragment_count，把完整箭头切成跨越
+; 根据 fragment_split/fragment_count，把当前水平相位的纹理切成跨越
 ; 相邻字符行的上下两片。FULL 槽在过渡期间直接承担 LOWER，因此每个方向
 ; 只消耗两个运行时字符，而不是完整、上部、下部三个字符。
-; EN: Split immutable left/right arrow templates into runtime UPPER and LOWER rows.
+; EN: Split the horizontally animated RAM patterns into UPPER and LOWER rows.
 update_conveyor_fragment_glyphs:
     ; 第一步把四个目标字形清成黑色。未被下面复制覆盖的像素行就是裁切区。
     ldy #7
@@ -58,9 +66,9 @@ update_conveyor_fragment_glyphs:
     ldx #0
     ldy fragment_split
 @upper:
-    lda conveyor_left_source_glyph, x
+    lda conveyor_left_pattern, x
     sta conveyor_left_upper_glyph, y
-    lda conveyor_right_source_glyph, x
+    lda conveyor_right_pattern, x
     sta conveyor_right_upper_glyph, y
     inx
     iny
@@ -71,9 +79,9 @@ update_conveyor_fragment_glyphs:
     ldx fragment_count
     ldy #0
 @lower:
-    lda conveyor_left_source_glyph, x
+    lda conveyor_left_pattern, x
     sta conveyor_left_full_glyph, y
-    lda conveyor_right_source_glyph, x
+    lda conveyor_right_pattern, x
     sta conveyor_right_full_glyph, y
     inx
     iny
@@ -87,46 +95,58 @@ restore_conveyor_full_glyphs:
     ; UPPER 槽在当前完整字符画面中无人引用，可以留到下次滚动再清空。
     ldy #7
 @copy:
-    lda conveyor_left_source_glyph, y
+    lda conveyor_left_pattern, y
     sta conveyor_left_full_glyph, y
-    lda conveyor_right_source_glyph, y
+    lda conveyor_right_pattern, y
     sta conveyor_right_full_glyph, y
     dey
     bpl @copy
     rts
 
-; EN: Restore original N/S/-/V bytes before drawing title or game-over text.
-restore_modal_font_glyphs:
-    ; N/S/- 连续占据 19..21；V 位于 30。H 从未覆盖，游戏中可稳定显示 HP。
-    ldx #0
-@copy_19_21:
-    lda modal_font_19_21, x
-    sta conveyor_left_full_glyph, x
-    inx
-    cpx #24
-    bne @copy_19_21
+.assert * <= $3800, error, "conveyor-platform code exceeds reserved gameplay memory"
 
-    ldy #7
-@copy_v:
-    lda modal_font_v, y
-    sta conveyor_right_upper_glyph, y
-    dey
-    bpl @copy_v
+.segment "CHARSETCODE"
+
+; EN: One call per game frame; rotate paired bits without moving platform bounds.
+update_conveyor_animation:
+    dec conveyor_animation_counter
+    bne @done
+    lda #CONVEYOR_ANIMATION_FRAMES
+    sta conveyor_animation_counter
+
+    ; 先把移出的边缘位放入 C，再旋转 RAM 字节，实现首尾相接的循环移位。
+    ; 每行连续两次，保证白/蓝多色位对不被拆开。
+    ldx #7
+@rotate:
+    lda conveyor_left_pattern, x
+    asl
+    rol conveyor_left_pattern, x
+    lda conveyor_left_pattern, x
+    asl
+    rol conveyor_left_pattern, x
+    lda conveyor_right_pattern, x
+    lsr
+    ror conveyor_right_pattern, x
+    lda conveyor_right_pattern, x
+    lsr
+    ror conveyor_right_pattern, x
+    dex
+    bpl @rotate
+
+    lda fine_scroll
+    cmp #7
+    beq @full
+    clc
+    adc #1
+    sta fragment_split
+    lda #7
+    sec
+    sbc fine_scroll
+    sta fragment_count
+    jmp update_conveyor_fragment_glyphs
+@full:
+    jmp restore_conveyor_full_glyphs
+@done:
     rts
 
-; 黑色“<”和“>”是在全绿字符中把对应位清零形成的。模板放在 GAMEPLAY
-; 段中，运行时只读；CHARSET 中的四个目标槽则允许逐帧改写。
-conveyor_left_source_glyph:
-    .byte $f9,$f3,$e7,$cf,$e7,$f3,$f9,$ff
-conveyor_right_source_glyph:
-    .byte $9f,$cf,$e7,$f3,$e7,$cf,$9f,$ff
-
-; 字符 19..21 与 30 原始的 N、S、连字符、V。进入模态画面前恢复。
-modal_font_19_21:
-    .byte $66,$76,$7e,$7e,$6e,$66,$66,$00
-    .byte $3c,$66,$60,$3c,$06,$66,$3c,$00
-    .byte $00,$00,$00,$7e,$00,$00,$00,$00
-modal_font_v:
-    .byte $66,$66,$66,$66,$66,$3c,$18,$00
-
-.assert * <= $3800, error, "conveyor-platform code exceeds reserved gameplay memory"
+.assert * <= $5400, error, "conveyor animation exceeds charset-code memory"
