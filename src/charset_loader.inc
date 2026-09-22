@@ -21,7 +21,7 @@
     jsr copy_charset_glyphs
 .endmacro
 
-; 游戏：图形库前 66 槽（含补零）打底，然后加入 HUD 使用的文字。
+; 游戏：图形库前 68 槽（含补零）打底，然后加入 HUD 使用的文字。
 ; EN: Import graphics, then digits and H/O/P/T/X/colon/S/C/R/E from source 2.
 load_game_charset:
     jsr blank_charset_display

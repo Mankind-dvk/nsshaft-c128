@@ -1,12 +1,13 @@
 ; 字形编号表 / Mixed multicolor/hires glyph allocation
 ; ---------------------------------------------------------------------------
-; GLYPH_* 是字形索引；CHAR_* 是屏幕码。本项目分配前 66 槽，不启用 ECM。
+; GLYPH_* 是字形索引；CHAR_* 是屏幕码。本项目分配前 68 槽，不启用 ECM。
 ; 第一源库只放图形，第二源库提供文字，VIC 始终读取 $2800 的合成结果。
 ; EN: Two immutable inputs -> one live output; Color RAM selects hires/multicolor.
 ; Game slots: 0 blank; 1..7 bodies; 8..19 fragments; 20..39 UI/ceiling;
 ;             40..55 imported HUD text; 56..61 fade variants; 62..65 SCORE letters.
+;             66..67 independent conveyor LOWER fragments.
 CHARSET_ADDRESS = $2800
-CHARSET_GLYPH_COUNT = 66
+CHARSET_GLYPH_COUNT = 68
 CHARSET_GLYPH_BYTES = 8
 SOURCE_CHARSET_GLYPH_COUNT = 256
 SOURCE_CHARSET_BYTES = SOURCE_CHARSET_GLYPH_COUNT * CHARSET_GLYPH_BYTES
@@ -66,6 +67,8 @@ GLYPH_S = 62
 GLYPH_C = 63
 GLYPH_R = 64
 GLYPH_E = 65
+GLYPH_CONVEYOR_LEFT_LOWER = 66
+GLYPH_CONVEYOR_RIGHT_LOWER = 67
 
 CHAR_BLANK = GLYPH_BLANK
 CHAR_PLATFORM_FULL = GLYPH_PLATFORM_FULL
@@ -86,6 +89,8 @@ CHAR_SPRING_COMPRESSED_UPPER = GLYPH_SPRING_COMPRESSED_UPPER
 CHAR_SPRING_COMPRESSED_LOWER = GLYPH_SPRING_COMPRESSED_LOWER
 CHAR_CONVEYOR_LEFT_UPPER = GLYPH_CONVEYOR_LEFT_UPPER
 CHAR_CONVEYOR_RIGHT_UPPER = GLYPH_CONVEYOR_RIGHT_UPPER
+CHAR_CONVEYOR_LEFT_LOWER = GLYPH_CONVEYOR_LEFT_LOWER
+CHAR_CONVEYOR_RIGHT_LOWER = GLYPH_CONVEYOR_RIGHT_LOWER
 CHAR_FADE_UPPER = GLYPH_FADE_UPPER
 CHAR_FADE_LOWER = GLYPH_FADE_LOWER
 
@@ -181,6 +186,8 @@ TEXT_QUESTION = 63
 platform_full_glyph = CHARSET_ADDRESS + GLYPH_PLATFORM_FULL*CHARSET_GLYPH_BYTES
 conveyor_left_full_glyph = CHARSET_ADDRESS + GLYPH_CONVEYOR_LEFT_FULL*CHARSET_GLYPH_BYTES
 conveyor_right_full_glyph = CHARSET_ADDRESS + GLYPH_CONVEYOR_RIGHT_FULL*CHARSET_GLYPH_BYTES
+conveyor_left_lower_glyph = CHARSET_ADDRESS + GLYPH_CONVEYOR_LEFT_LOWER*CHARSET_GLYPH_BYTES
+conveyor_right_lower_glyph = CHARSET_ADDRESS + GLYPH_CONVEYOR_RIGHT_LOWER*CHARSET_GLYPH_BYTES
 fade_cracked_full_glyph = CHARSET_ADDRESS + GLYPH_FADE_CRACKED_FULL*CHARSET_GLYPH_BYTES
 normal_upper_glyph = CHARSET_ADDRESS + GLYPH_NORMAL_UPPER*CHARSET_GLYPH_BYTES
 normal_lower_glyph = CHARSET_ADDRESS + GLYPH_NORMAL_LOWER*CHARSET_GLYPH_BYTES
@@ -210,6 +217,6 @@ conveyor_left_source_glyph = GRAPHICS_CHARSET_ADDRESS + GLYPH_CONVEYOR_LEFT_FULL
 conveyor_right_source_glyph = GRAPHICS_CHARSET_ADDRESS + GLYPH_CONVEYOR_RIGHT_FULL*CHARSET_GLYPH_BYTES
 
 .assert (CHARSET_ADDRESS & $07ff) = 0, error, "Charset base must be 2 KB aligned"
-.assert GLYPH_E < CHARSET_GLYPH_COUNT, error, "Game layout exceeds live charset"
+.assert GLYPH_CONVEYOR_RIGHT_LOWER < CHARSET_GLYPH_COUNT, error, "Game layout exceeds live charset"
 .assert GLYPH_DIGIT_0 = GRAPHICS_GLYPH_COUNT, error, "HUD must follow custom graphics"
 .assert TEXT_QUESTION < CHARSET_GLYPH_COUNT, error, "Text page exceeds live charset"

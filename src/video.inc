@@ -193,8 +193,8 @@ complete_fragment_transition:
     jsr advance_platform_rows
     jsr render_hidden_platforms
 
-    ; 传送平台的 FULL 槽在过渡阶段兼任 LOWER；在底部生成新平台和翻屏前
-    ; 恢复当前水平相位的完整纹理，不能将表面动画重置回源图案。
+    ; 翻屏前更新传送平台的独立 FULL 槽，保留旧屏仍引用的 LOWER 碎片。
+    ; 使用当前水平相位，不能将表面动画重置回源图案。
     jsr restore_conveyor_full_glyphs
 
     lda active_screen
@@ -272,48 +272,7 @@ show_start_screen:
 
 ; EN: Load the full text page, clear gameplay, and draw the game-over screen.
 show_game_over_screen:
-    ; 与开始画面相同，但标题使用红色。游戏世界不会在此期间继续滚动。
-    jsr prepare_modal_screen
-
-    ldx #0
-@title:
-    lda game_over_title, x
-    STORE_SCREEN_PAIR GAME_OVER_OFFSET, x
-    lda #COLOR_RED
-    sta COLOR_RAM+GAME_OVER_OFFSET, x
-    inx
-    cpx #9
-    bne @title
-
-    ; 游戏画面和模态画面共用硬件 sprite 0。清屏已经清除了指针表，所以要在
-    ; 此处重新写入 hurt 块号、固定坐标和单色寄存器，然后只启用 sprite 0。
-    jsr show_game_over_player
-    jsr draw_action_prompt
-    jmp enable_charset_display
-
-; EN: Center the hurt frame between GAME OVER and PRESS FIRE using sprite 0.
-show_game_over_player:
-    ldy selected_character
-    lda character_hurt_blocks, y
-    STORE_SPRITE_POINTER 0
-
-    lda #GAME_OVER_PLAYER_X
-    sta VIC_SPRITE_0_X
-    lda #GAME_OVER_PLAYER_Y
-    sta VIC_SPRITE_0_Y
-    CLEAR_REGISTER_BITS VIC_SPRITE_X_HIGH, %00000001
-
-    lda #0
-    sta VIC_SPRITE_MULTICOLOR
-    sta VIC_SPRITE_X_EXPAND
-    sta VIC_SPRITE_Y_EXPAND
-    sta VIC_SPRITE_PRIORITY
-    lda character_color_table, y
-    sta VIC_SPRITE_0_COLOR
-    lda #%00000001
-    sta VIC_SPRITE_ENABLE
-    rts
-
+    jmp show_highscore_table
 ; EN: Mirror the ten-character action prompt into both screen buffers.
 draw_action_prompt:
     ; 同一份十字符提示写入 A/B；这样从菜单返回前无论 D018 原值如何都一致。

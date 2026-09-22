@@ -34,7 +34,9 @@ the same generated machine code while making ownership and call flow explicit.
 | `src/music.inc` | PAL raster IRQ, three SID voices, instruments, frequency and pattern tables |
 | `src/charset_ids.inc` | Game glyph IDs/screen codes and separate text-layout codes |
 | `src/platform_materials.inc` | Multicolor fragments, colors, transition and collision lookup tables |
-| `src/charset.inc` | Writable 66-slot output and resource includes |
+| `src/charset.inc` | Writable 68-slot output and resource includes |
+| `src/highscores.inc` | TOP 5, keyboard name entry and text-only game-over flow |
+| `src/highscore_storage.inc` | Alternating checked disk records and KERNAL state isolation |
 | `src/graphics_charset.inc` | Source charset 1: only custom graphics, unused slots zero |
 | `src/text_charset.inc` | Source charset 2: imported uppercase font |
 | `src/charset_loader.inc` | Eight-byte range copies and scene-entry composition |
@@ -125,9 +127,9 @@ than one display frame.
 | Range | Use |
 | --- | --- |
 | `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
-| `$1d00-$27d5` | Main loop, video, platform descriptions/rendering, HUD, score, tables and state |
-| `$2800-$2a0f` | Writable 66-glyph mixed-mode output charset |
-| `$2a10-$2dd2` | SID player, frequency tables and 16-bar arrangement |
+| `$1d00-$2786` | Main loop, video, platform descriptions/rendering, HUD, score, tables and state |
+| `$2800-$2a1f` | Writable 68-glyph mixed-mode output charset |
+| `$2a20-$2de2` | SID player, frequency tables and 16-bar arrangement |
 | `$2e00-$2f2c` | Disappearing-platform effect routines |
 | `$3000-$303f` | Player normal frame |
 | `$3040-$307f` | Player falling frame |
@@ -140,7 +142,8 @@ than one display frame.
 | `$3cc0-$3e64` | Character-selection code, prompt text and frame/color lookup tables |
 | `$4000-$47ff` | Immutable graphics-only source charset, 2 KB |
 | `$4800-$4fff` | Immutable uppercase text source charset, 2 KB |
-| `$5000-$5358` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| `$5000-$5360` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| `$5400-$630a` | Leaderboard, keyboard name entry, disk persistence and buffers |
 | `$0400-$07ff` | Screen buffer A and its sprite pointers |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointers |
 | `$d800-$dbff` | Shared VIC color RAM |
@@ -192,7 +195,7 @@ hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
   flip. Correct visible timing still requires checking the raster deadline.
 - The status panel is never included in platform transitions or collision scans.
 - Collision row pointers reuse the playfield low/high address tables. Sampled
-  screen codes index a 66-byte collision-type table; UPPER fragments map to none.
+  screen codes index a 68-byte collision-type table; UPPER fragments map to none.
 - Score digits are written to both screen buffers. A parallel 20-byte row table
   moves with each coarse scroll and marks platforms claimed on first landing.
   Spike contact claims and scores the row before damage handling, so surviving
@@ -253,11 +256,10 @@ hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
   Four horizontal phases repeat every 12 frames regardless of player support or
   whether the world scrolls that frame. Only the texture moves horizontally;
   platform boundaries and collision geometry do not.
-- Each conveyor direction shares its FULL character with its LOWER transition
-  fragment: FULL/LOWER slots 5/6 and UPPER slots 18/19 consume four slots total,
-  without modal-letter aliases. Animation rebuilds these glyphs at the current
-  vertical phase. Before a completed coarse scroll becomes visible, FULL is
-  restored from the current horizontal pattern, never the initial source phase.
+- Conveyors use independent FULL 5/6, UPPER 18/19 and LOWER 66/67 slots.
+  Fragment rebuilding does not reshape FULL cells on the still-visible matrix.
+  Before a completed coarse scroll becomes visible, FULL is refreshed from the
+  current horizontal pattern without changing the old matrix's LOWER fragments.
 - Modal entry copies the first 64 glyphs from source charset 2; TEXT_* uses
   standard C64 uppercase screen codes. No modal letters alias game fragments.
 - New-game entry reconstructs the output from custom graphics plus only the

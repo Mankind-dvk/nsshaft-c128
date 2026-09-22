@@ -1,5 +1,6 @@
 # Generated builds and local verification
 /build/
+/saves/*.d64
 /tests/
 /tools/
 /run-sid-test.ps1

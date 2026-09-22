@@ -57,12 +57,14 @@ start:
     ; 输出：完成 C128/VIC-IIe/CIA 基础配置，然后进入标题或自动测试流程。
     ; SEI 先阻止异步 IRQ 在内存映射尚未稳定时执行；音乐初始化完成后再 CLI。
     sei
+    cld
 
     ; C128 原生 VIC-IIe 版本：可见显示期间让 8502 保持在 1 MHz。
     ; BASIC 可能将 CPU 留在其他 RAM bank，因此在改写 VIC 可见的屏幕、
     ; 字符集和 sprite 之前，必须明确映射 RAM bank 0。
     lda #MMU_CONFIG_BANK0_IO
     sta MMU_CONFIG
+    jsr highscore_storage_bootstrap
     CLEAR_REGISTER_BITS VIC_CPU_SPEED, %00000001
     CLEAR_REGISTER_BITS MMU_RAM_CONFIG, %01000000
 
@@ -96,6 +98,7 @@ start:
 
     jsr initialize_paddles
     jsr stop_music
+    jsr initialize_highscores
 .ifdef AUTO_START_TEST
     ; 画面/物理自动化测试只绕过标题按钮，仍执行正常游戏主循环。
     jmp new_game
@@ -104,6 +107,7 @@ start:
     ; 自动化回归版本绕过标题按钮，只用于 VICE 的限时启动和 SID 写入检查。
     jmp new_game
 .endif
+    jsr highscore_load_at_start
 start_screen:
     jsr show_start_screen
     jsr run_character_selection
@@ -185,8 +189,7 @@ main_loop:
 game_over_screen:
     ; 结束画面确认后回到选人界面；下一局仍由 new_game 完整重建随机世界。
     jsr stop_music
-    jsr show_game_over_screen
-    jsr wait_for_action_button
+    jsr run_highscore_game_over
     jmp start_screen
 
 ; EN: Wait until raster 250 is left and reached again, preventing double updates.
@@ -221,3 +224,5 @@ wait_for_frame:
 .include "music.inc"
 .include "assets.inc"
 .include "state.inc"
+.include "highscores.inc"
+.include "highscore_storage.inc"

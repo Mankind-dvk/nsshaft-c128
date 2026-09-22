@@ -42,29 +42,29 @@ raster IRQs. Native C128 MMU setup, VIC bank 0, screen buffers, and SID IRQ rema
 
 | 地址 / Range | 用途 / Use |
 | --- | --- |
-| `$2800-$2a0f` | 528 字节可写混合模式输出 / writable 66-glyph mixed-mode output |
+| `$2800-$2a1f` | 544 字节可写混合模式输出 / writable 68-glyph mixed-mode output |
 | `$4000-$47ff` | 2048 字节图形源库 / 256-slot immutable graphics source |
 | `$4800-$4fff` | 2048 字节文字源库 / 256-slot immutable text source |
-| `$5000-$5358` | 材质/碰撞查表、描述效果同步、传送带动画和字库合成 / material/collision tables, descriptor effects, conveyor animation and composition |
+| `$5000-$5360` | 材质/碰撞查表、描述效果同步、传送带动画和字库合成 / material/collision tables, descriptor effects, conveyor animation and composition |
 
 两套源库都保留完整 2 KB 格式，但不直接给 VIC 显示，因而可以放在当前
 16 KB VIC bank 之外。CPU 将所需字形复制到 bank 内的 `$2800`，`$d018`
-仍为 `$1a/$3a`，只随屏幕 A/B 切换。当前关闭 ECM，输出预留前 66 槽；
-新增 SCORE 字母使用 62–65，音乐起点相应移至 `$2a10`；不能使用 66 及以上编号。
+仍为 `$1a/$3a`，只随屏幕 A/B 切换。当前关闭 ECM，输出预留前 68 槽；
+SCORE 字母使用 62–65，传送平台 LOWER 使用 66–67，音乐起点移至 `$2a20`。
 
 Both 2 KB sources are CPU-readable templates outside the active VIC bank. The
 CPU copies selected glyphs into `$2800` inside that bank. `$d018` stays `$1a/$3a`
-for the two screen buffers. ECM is off; 66 glyphs are allocated and music starts at $2a10;
+for the two screen buffers. ECM is off; 68 glyphs are allocated and music starts at $2a20;
 larger indices would read the adjacent music data rather than valid glyphs.
 
 ## 3. 第一源库与游戏布局 / Graphics source and game layout
 
 以下为十进制槽号。第一源库定义 0–39 和 56–61，其余全部补零；文字只能
-从第二源库抽取，不能再混入第一源库。游戏输出先复制第一源库前 66 槽，
+从第二源库抽取，不能再混入第一源库。游戏输出先复制第一源库前 68 槽，
 再将 20 个 HUD 字形放到 40–55 和 62–65。
 
 Slots below are decimal. Source 1 defines 0–39 and 56–61; all other slots are zero.
-Game output first copies source 1 slots 0–65, then imports 20 HUD glyphs into 40–55 and 62–65.
+Game output first copies source 1 slots 0–67, then imports 20 HUD glyphs into 40–55 and 62–65.
 
 | 游戏输出槽 / Game slots | 内容 / Contents |
 | --- | --- |
@@ -81,6 +81,7 @@ Game output first copies source 1 slots 0–65, then imports 20 HUD glyphs into 
 | 56–58 | 未激活完整红砖灰缝 FULL/UPPER/LOWER / Intact idle fade |
 | 59–61 | 灰缝完全脱落 FULL/UPPER/LOWER / Broken active fade |
 | 62–65 | SCORE 新增字母 S C R E / Additional SCORE letters |
+| 66–67 | 左右传送平台独立 LOWER 碎片 / Independent conveyor LOWER fragments |
 
 普通台阶槽 1 和边框槽 20 共用砖纹定义：`$f7,$f7,$55,$7f,$7f,$55,$f7,$f7`。
 开启多色字符模式（D011=$1b，D016=$18），Color RAM=10；位对 00=黑、01=白、
@@ -114,11 +115,10 @@ Fixed geometry uses origin Y=50, not the phase-biased moving-platform base 43.
 
 - 普通砖台阶使用 1/8/9，未激活红砖灰缝台阶使用 56/57/58，不共用碎片。
   Normal bricks use 1/8/9; intact idle fades use independent 56/57/58.
-- 传送本体 5/6 在转场中兼任 LOWER，UPPER 独立放在 18/19；粗滚动完成前
-  从当前水平相位恢复完整纹理，不回到初始图。因此碎片组列出的是“专用碎片”，
-  不是全部可写槽，左右两类仍只占四槽。
-  Conveyor FULL 5/6 doubles as LOWER; UPPER uses 18/19. Restore the current
-  horizontal texture phase at each completed coarse scroll, not the initial image.
+- 传送平台 FULL 使用 5/6，UPPER 使用 18/19，LOWER 独立使用 66/67。
+  不再复用 FULL/LOWER，避免翻屏前修改仍被旧屏引用的完整字形或下部碎片。
+  Conveyors use separate FULL 5/6, UPPER 18/19 and LOWER 66/67 slots. Coarse
+  scroll refreshes FULL from the current animation phase without reshaping LOWER.
 
 向右传送平台源图为 `$5f,$d7,$f5,$7d,$7d,$f5,$d7,$5f`，向左平台使用其水平镜像
 `$f5,$d7,$5f,$7d,$7d,$5f,$d7,$f5`。每行仅反转四个位对的排列，不反转位对内部
@@ -151,11 +151,11 @@ three stages; pairs 00/10/11 select black gaps/gray mortar/red bricks. Shared 01
 remains white; there is no color flashing or global palette change.
 
 转场先清空隐藏屏的游戏区，再按平台描述绘制连续跨度。碎片阶段每个平台查
-`fragment_lower_codes`、`fragment_upper_codes` 两张 66 项表；完整阶段直接使用
+`fragment_lower_codes`、`fragment_upper_codes` 两张 68 项表；完整阶段直接使用
 描述中保存的本体字符码，不再逐格识别和转换。每个平台查询一次
 `game_character_colors`，只为占用格写 Color RAM；字形 0 全黑，空格无需改色。
 Transitions clear the hidden playfield, then draw spans from platform descriptions.
-Fragment layouts look up the two 66-entry lower/upper tables once per platform;
+Fragment layouts look up the two 68-entry lower/upper tables once per platform;
 full layouts use the stored body code directly, without per-cell classification.
 Each platform looks up its color once and writes Color RAM only for occupied cells.
 Blank cells retain their color because glyph 0 is black in either mode.
@@ -188,11 +188,11 @@ sta COLOR_RAM+10*SCREEN_COLUMNS+12
 ```
 
 实际界面文本仍通过 `STORE_SCREEN_PAIR` 镜像到两张矩阵。菜单清屏用空格32，
-游戏清屏用空白0。新增排行榜可复用此文字页；本次没有实现排行榜逻辑。
+游戏清屏用空白0。排行榜和八字符姓名输入复用此文字页，不显示角色 sprite。
 
 Actual UI routines mirror text to both matrices with `STORE_SCREEN_PAIR`.
-Clear modal screens with space 32, game screens with blank 0. A future leaderboard
-can use the same text page; leaderboard logic is not implemented by this change.
+Clear modal screens with space 32, game screens with blank 0. The leaderboard
+and eight-character name entry use this text page without character sprites.
 
 ## 5. 生命周期和扩展 / Lifecycle and extension
 
@@ -212,9 +212,9 @@ Every new game rebuilds from immutable graphics. Only output glyphs are animated
 The first source is graphics-only; the game output intentionally combines graphics
 and imported HUD text.
 
-新增 HUD 符号时，先扩展当前已用满的 66 槽布局并检查音乐边界，再分配编号并增加
+新增 HUD 符号时，先扩展当前已用满的 68 槽布局并检查音乐边界，再分配编号并增加
 `COPY_CHARSET_RANGE text_charset, 源编号, 目标编号, 数量`。不要把位图写回
-图形源库。宏会检查源范围和输出 66 槽限制；新增完整游戏中字母表仍需重新
+图形源库。宏会检查源范围和输出 68 槽限制；新增完整游戏中字母表仍需重新
 预算空间，不能因为源库有 256 字形就直接使用 256 种。
 
 For another HUD symbol, allocate a free game slot and add a range import from

@@ -44,6 +44,28 @@ After `GAME OVER`, FIRE returns to the selection screen so the next round may
 use another character. Scrolling and gameplay are paused throughout these modal
 screens.
 
+### Persistent TOP 5
+
+Game over checks the six-digit score before asking for a name. Qualifying
+players enter up to eight letters, digits or spaces: DEL erases and RETURN
+confirms a nonblank name. Equal scores keep older records first. The text-only
+leaderboard highlights the new entry; FIRE returns to character selection.
+
+Use `run-x128.ps1` to run in PAL mode with a persistent writable device-8 disk.
+The launcher creates `saves/nsshaft-scores.d64` only when absent and injects the
+PRG into RAM without replacing the mounted score disk. Keep this disk across
+rebuilds and emulator restarts; close VICE before backing it up. Direct PRG
+autostart alone does not guarantee that this disk is mounted.
+
+The game alternates `NSSHAFT.A` and `NSSHAFT.B` SEQ files, with a version,
+generation and CRC-16. Saves are read back before reporting `SCORES SAVED`;
+startup selects the latest valid slot. On failure, R retries and FIRE continues
+with the in-memory table; unsaved records remain explicitly marked.
+
+For C128/Pi1541 use, put the PRG in a writable D64, keep that image mounted
+during play, and safely eject/write back the image before powering off Pi1541.
+Names use the C128 keyboard; gameplay still needs a paddle on control port 1.
+
 Platform positions and widths use a PRNG seeded from the KERNAL clock, CIA
 timers/TOD and raster timing, mixed with two bytes inside the loaded PRG. Those
 bytes are not power-up RAM entropy, and the KERNAL clock stops updating once
@@ -119,8 +141,8 @@ one HP without reducing score. A spike hit consumes one HP and bounces the
 player upward; top-frame contact consumes one HP and drops the player back into
 the shaft. Either hazard is fatal when HP is already zero. An absorbed hit gives
 the selected character's hurt frame priority for 16 PAL frames. The same
-selected hurt frame is centered between `GAME OVER` and `PRESS FIRE` on the
-modal game-over screen.
+selected hurt frame remains available during gameplay; the game-over screen
+now displays the leaderboard without a character sprite.
 
 World scrolling uses an 8-bit phase accumulator instead of a whole-frame delay.
 The initial rate is 128/256 pixel per frame, matching the previous actual rate
@@ -174,9 +196,9 @@ The renderer combines:
 - a hidden-playfield clear and descriptor-driven redraw at the two character
   layout transitions; the six intermediate pixel steps still only update glyphs
 - two screen buffers at `$0400` and `$0c00`
-- native code and state at `$1d00-$27d5`
-- a writable 66-glyph mixed-mode output charset at `$2800-$2a0f`
-- SID player and pattern data at `$2a10-$2dd2`
+- native code and state at `$1d00-$2786`
+- a writable 68-glyph mixed-mode output charset at `$2800-$2a1f`
+- SID player and pattern data at `$2a20-$2de2`
 - sprite storage at `$3000-$313f`: Elien's four movement frames and the writable
   dial hand
 - player physics, ceiling recovery and spring/conveyor code at `$3140-$3779`
@@ -186,7 +208,12 @@ The renderer combines:
 - title-selection code, prompt text and character tables at `$3cc0-$3e64`
 - graphics-only source charset at `$4000-$47ff`
 - uppercase text source charset at `$4800-$4fff`, imported from the teacher's font
-- material/collision tables, descriptor effect updates, conveyor animation and charset composition at `$5000-$5358`
+- material/collision tables, descriptor effect updates, conveyor animation and charset composition at `$5000-$5360`
+- leaderboard, name entry and disk persistence at `$5400-$630a`
+
+Conveyor FULL glyphs 5/6 no longer double as LOWER fragments: independent LOWER
+glyphs 66/67 prevent fragment rebuilding from reshaping still-visible FULL cells.
+UPPER glyphs remain 18/19. Horizontal animation and player push are unchanged.
 
 Each logical row holds at most one platform, separated from the next platform by
 blank rows. `draw_platform` records its description; coarse scrolling shifts

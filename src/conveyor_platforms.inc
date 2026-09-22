@@ -7,8 +7,8 @@
 ; Color RAM=14（bit 3=1），多色位对 01=白、11=蓝、00=黑色裁切区。
 ; 水平动画只改写独立 RAM 图案，再按当前垂直相位生成显示字形。
 ;
-; 每个方向只需要 FULL/LOWER 共用槽和 UPPER 槽，合计四槽而非六槽。
-; 完整纹理在本体区 5/6，UPPER 在碎片区 18/19；粗滚动保留当前水平相位。
+; 每个方向独立保存 FULL、UPPER、LOWER，避免翻屏前改坏可见完整平台。
+; FULL 使用 5/6，UPPER 使用 18/19，LOWER 使用 66/67；保留水平动画相位。
 ; 菜单不借用任何平台槽；charset_loader.inc 在场景入口装载完整文字页。
 ;
 ; 公共入口：
@@ -17,15 +17,15 @@
 ;
 ; English summary:
 ;   White/blue belts rotate one multicolor pixel left/right every three frames,
-;   independently of player support. Each FULL slot doubles as LOWER; separate
-;   RAM patterns preserve horizontal phase across vertical fragment rebuilds.
+;   independently of player support. FULL and LOWER have separate slots so
+;   fragment rebuilding cannot reshape FULL cells on the still-visible screen.
 
 .segment "GAMEPLAY"
 
-; EN: Reset horizontal phase, install FULL glyphs and clear both UPPER slots.
+; EN: Reset horizontal phase, install FULL glyphs and clear all fragment slots.
 initialize_conveyor_platforms:
     ; 新游戏已经清空两张屏幕，可安全重置上局留下的传送平台碎片。
-    ; 完整平台使用 LEFT/RIGHT_FULL；两个 UPPER 槽等第一次滚动时再生成。
+    ; 完整平台使用 LEFT/RIGHT_FULL；UPPER/LOWER 等第一次滚动时再生成。
     lda #CONVEYOR_ANIMATION_FRAMES
     sta conveyor_animation_counter
     ldy #7
@@ -42,22 +42,23 @@ initialize_conveyor_platforms:
 @clear_upper:
     sta conveyor_left_upper_glyph, y
     sta conveyor_right_upper_glyph, y
+    sta conveyor_left_lower_glyph, y
+    sta conveyor_right_lower_glyph, y
     dey
     bpl @clear_upper
     rts
 
 ; 根据 fragment_split/fragment_count，把当前水平相位的纹理切成跨越
-; 相邻字符行的上下两片。FULL 槽在过渡期间直接承担 LOWER，因此每个方向
-; 只消耗两个运行时字符，而不是完整、上部、下部三个字符。
+; 相邻字符行的上下两片。只写 UPPER/LOWER，保留仍可能被可见屏引用的 FULL。
 ; EN: Split the horizontally animated RAM patterns into UPPER and LOWER rows.
 update_conveyor_fragment_glyphs:
     ; 第一步把四个目标字形清成黑色。未被下面复制覆盖的像素行就是裁切区。
     ldy #7
     lda #$00
 @clear:
-    sta conveyor_left_full_glyph, y
+    sta conveyor_left_lower_glyph, y
     sta conveyor_left_upper_glyph, y
-    sta conveyor_right_full_glyph, y
+    sta conveyor_right_lower_glyph, y
     sta conveyor_right_upper_glyph, y
     dey
     bpl @clear
@@ -75,24 +76,24 @@ update_conveyor_fragment_glyphs:
     cpx fragment_count
     bne @upper
 
-    ; 源字形剩余的底部行移到当前字符格顶部。FULL 槽此时就是 LOWER 碎片。
+    ; 源字形剩余的底部行移到当前字符格顶部，使用独立 LOWER 槽。
     ldx fragment_count
     ldy #0
 @lower:
     lda conveyor_left_pattern, x
-    sta conveyor_left_full_glyph, y
+    sta conveyor_left_lower_glyph, y
     lda conveyor_right_pattern, x
-    sta conveyor_right_full_glyph, y
+    sta conveyor_right_lower_glyph, y
     inx
     iny
     cpx #8
     bne @lower
     rts
 
-; EN: Restore FULL/LOWER shared slots before exposing a completed coarse scroll.
+; EN: Refresh independent FULL slots without altering visible LOWER fragments.
 restore_conveyor_full_glyphs:
     ; 完成八像素粗滚动、生成底部新平台之前调用。只恢复两个 FULL 槽；
-    ; UPPER 槽在当前完整字符画面中无人引用，可以留到下次滚动再清空。
+    ; 不改写旧屏上的 UPPER/LOWER，完整字形由下一张屏幕使用。
     ldy #7
 @copy:
     lda conveyor_left_pattern, y

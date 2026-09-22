@@ -68,6 +68,7 @@ game_character_colors:
     .res 34, COLOR_WHITE        ; 22..55 dial and text
     .res 6, FADE_CELL_COLOR     ; 56..61 intact/broken fade variants
     .res 4, COLOR_WHITE         ; 62..65 SCORE letters
+    .res 2, CONVEYOR_CELL_COLOR ; 66..67 conveyor LOWER fragments
 game_character_colors_end:
 .assert game_character_colors_end-game_character_colors = CHARSET_GLYPH_COUNT, error, "Color table size mismatch"
 
@@ -105,7 +106,11 @@ collision_type_by_char:
         .byte COLLISION_SPRING
     .elseif code = CHAR_CONVEYOR_LEFT_FULL
         .byte COLLISION_CONVEYOR_LEFT
+    .elseif code = CHAR_CONVEYOR_LEFT_LOWER
+        .byte COLLISION_CONVEYOR_LEFT
     .elseif code = CHAR_CONVEYOR_RIGHT_FULL
+        .byte COLLISION_CONVEYOR_RIGHT
+    .elseif code = CHAR_CONVEYOR_RIGHT_LOWER
         .byte COLLISION_CONVEYOR_RIGHT
     .else
         .byte COLLISION_NONE
@@ -118,7 +123,7 @@ platform_colors:
     .byte BRICK_CELL_COLOR, SPIKE_CELL_COLOR, FADE_CELL_COLOR
     .byte COLOR_PURPLE, CONVEYOR_CELL_COLOR, CONVEYOR_CELL_COLOR
 
-; 编译期生成两个 66 项转换表，每个平台查一次 FULL -> LOWER/UPPER。
+; 编译期生成两个 68 项转换表，每个平台查一次 FULL -> LOWER/UPPER。
 ; EN: FULL -> LOWER; unrelated occupied cells are retained.
 fragment_lower_codes:
 .repeat CHARSET_GLYPH_COUNT, code
@@ -136,6 +141,10 @@ fragment_lower_codes:
         .byte CHAR_FADE_CRACKED_LOWER
     .elseif code = CHAR_FADE_BROKEN_FULL
         .byte CHAR_FADE_BROKEN_LOWER
+    .elseif code = CHAR_CONVEYOR_LEFT_FULL
+        .byte CHAR_CONVEYOR_LEFT_LOWER
+    .elseif code = CHAR_CONVEYOR_RIGHT_FULL
+        .byte CHAR_CONVEYOR_RIGHT_LOWER
     .else
         .byte code
     .endif

@@ -132,7 +132,7 @@ SID_POTX                = $d419
 PADDLE_PORT_1_SELECT    = $40
 
 ; SID 三声道音乐播放器使用的寄存器。每个硬件声道包含频率、波形/门控和
-; ADSR 包络寄存器。音乐代码位于 $2a10，不占用字符集和 sprite 数据区；
+; ADSR 包络寄存器。音乐代码位于 $2a20，不占用字符集和 sprite 数据区；
 ; 播放器由光栅 IRQ 每个 PAL 帧调用一次。
 SID_VOICE_1_FREQ_LOW    = $d400
 SID_VOICE_1_FREQ_HIGH   = $d401
