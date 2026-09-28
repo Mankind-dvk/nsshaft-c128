@@ -243,6 +243,10 @@ character_right_blocks:
     .byte PLAYER_RIGHT_BLOCK, EMBER_RIGHT_BLOCK, WASSER_RIGHT_BLOCK
 character_left_blocks:
     .byte PLAYER_LEFT_BLOCK, EMBER_LEFT_BLOCK, WASSER_LEFT_BLOCK
+character_fastleft_blocks:
+    .byte PLAYER_FASTLEFT_BLOCK, EMBER_FASTLEFT_BLOCK, WASSER_FASTLEFT_BLOCK
+character_fastright_blocks:
+    .byte PLAYER_FASTRIGHT_BLOCK, EMBER_FASTRIGHT_BLOCK, WASSER_FASTRIGHT_BLOCK
 character_hurt_blocks:
     .byte PLAYER_HURT_BLOCK, EMBER_HURT_BLOCK, WASSER_HURT_BLOCK
 character_color_table:

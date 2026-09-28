@@ -1,7 +1,8 @@
 # Generated builds and local verification
 /build/
 /saves/*.d64
-/tests/
+# Keep reproducible regression tests; ignore local SID scratch fixtures.
+/tests/sid-tone.*
 /tools/
 /run-sid-test.ps1
 __pycache__/

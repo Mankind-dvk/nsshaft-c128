@@ -124,7 +124,7 @@ graphics_slot_18:
 graphics_slot_19:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
 
-; --- 边框和表盘 / Frame and dial ---
+; --- 边框和顶部倒尖刺 / Frame and ceiling ---
 ; 20: 外框和 UI 分隔列共用红白多色砖纹。
 ; EN: Shared red/white multicolor brick pattern for the frame and UI divider.
     GRAPHICS_SLOT GLYPH_UI_FRAME
@@ -137,99 +137,9 @@ graphics_slot_20:
 graphics_slot_21:
     .byte $77,$dd,$17,$1d,$35,$0c,$04,$04
 
-; 22: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+0
-graphics_slot_22:
-    .byte $00,$00,$00,$00,$00,$00,$01,$07
-
-; 23: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+1
-graphics_slot_23:
-    .byte $00,$00,$00,$07,$1e,$70,$c0,$00
-
-; 24: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+2
-graphics_slot_24:
-    .byte $00,$00,$7f,$f0,$00,$00,$00,$00
-
-; 25: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+3
-graphics_slot_25:
-    .byte $00,$00,$fe,$0f,$00,$00,$00,$00
-
-; 26: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+4
-graphics_slot_26:
-    .byte $00,$00,$00,$e0,$78,$0e,$03,$00
-
-; 27: 表盘第一行
-    GRAPHICS_SLOT GLYPH_DIAL_TOP_FIRST+5
-graphics_slot_27:
-    .byte $00,$00,$00,$00,$00,$00,$80,$e0
-
-; 28: 表盘第二行
-    GRAPHICS_SLOT GLYPH_DIAL_MIDDLE_FIRST+0
-graphics_slot_28:
-    .byte $00,$00,$00,$00,$00,$00,$01,$01
-
-; 29: 表盘第二行
-    GRAPHICS_SLOT GLYPH_DIAL_MIDDLE_FIRST+1
-graphics_slot_29:
-    .byte $0e,$18,$30,$60,$e0,$c0,$80,$80
-
-; 30: 表盘第二行
-    GRAPHICS_SLOT GLYPH_DIAL_MIDDLE_FIRST+2
-graphics_slot_30:
-    .byte $70,$18,$0c,$06,$07,$03,$01,$01
-
-; 31: 表盘第二行
-    GRAPHICS_SLOT GLYPH_DIAL_MIDDLE_FIRST+3
-graphics_slot_31:
-    .byte $00,$00,$00,$00,$00,$00,$80,$80
-
-; 32: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+0
-graphics_slot_32:
-    .byte $03,$03,$02,$06,$06,$06,$07,$02
-
-; 33: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+1
-graphics_slot_33:
-    .byte $00,$00,$00,$00,$02,$02,$ff,$02
-
-; 34: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+2
-graphics_slot_34:
-    .byte $00,$00,$00,$00,$01,$01,$ff,$01
-
-; 35: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+3
-graphics_slot_35:
-    .byte $00,$00,$00,$00,$00,$00,$ff,$00
-
-; 36: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+4
-graphics_slot_36:
-    .byte $00,$00,$00,$00,$80,$80,$ff,$80
-
-; 37: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+5
-graphics_slot_37:
-    .byte $00,$00,$00,$00,$40,$40,$ff,$40
-
-; 38: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+6
-graphics_slot_38:
-    .byte $00,$00,$00,$00,$20,$20,$ff,$20
-
-; 39: 表盘第三行
-    GRAPHICS_SLOT GLYPH_DIAL_BOTTOM_FIRST+7
-graphics_slot_39:
-    .byte $c0,$c0,$40,$60,$60,$60,$e0,$40
-
 graphics_defined_end:
 .assert graphics_defined_end-graphics_charset = GRAPHICS_GLYPH_COUNT*CHARSET_GLYPH_BYTES, error, "Unexpected graphics count"
-    ; 40..55 由第二源字库提供文字，这里保持纯图形源库的空槽。
+    ; 22..39 已从表盘释放；40..55 由第二源字库提供文字。
     .res (GLYPH_FADE_FULL-GRAPHICS_GLYPH_COUNT)*CHARSET_GLYPH_BYTES, 0
     GRAPHICS_SLOT GLYPH_FADE_FULL
     ; 第一级：红砖与灰色填缝，11=红、10=灰。

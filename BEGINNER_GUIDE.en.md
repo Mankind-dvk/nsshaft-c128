@@ -165,19 +165,21 @@ Decimal 7424 is hexadecimal `$1d00`, the address of `start`.
 | `$0400-$07ff` | Screen buffer A and its sprite pointer table |
 | `$0c00-$0fff` | Screen buffer B and its sprite pointer table |
 | `$1c01-$1c0c` | BASIC 7 loader line |
-| `$1d00-$27d5` | Main loop, video, HUD, scoring, platform descriptions/rendering and state |
-| `$2800-$2a0f` | 66-character custom character set |
-| `$2a10-$2dd2` | SID player and arrangement data |
+| `$1d00-$25da` | Main loop, video, HUD, scoring, platform descriptions/rendering and state |
+| `$2800-$2a1f` | 68 glyph slots, including 22..39 free |
+| `$2a20-$2de2` | SID player and arrangement data |
 | `$2e00-$2f2c` | Disappearing-platform effect code |
 | `$3000-$30ff` | Four player sprite frames |
-| `$3100-$313f` | Writable dial-hand sprite |
-| `$3140-$3779` | Player physics, ceiling recovery and spring/conveyor code |
+| `$3100-$313f` | Free former dial-hand sprite block |
+| `$3140-$376d` | Player physics, ceiling recovery and spring/conveyor code |
 | `$3800-$39da` | Ceiling drawing, weighted generation, HP display and spike recovery |
 | `$3a00-$3cbf` | Elien hurt plus all five Ember and five Wasser frames |
-| `$3cc0-$3e64` | Character-selection code, prompt text, and frame/color tables |
+| `$3cc0-$3e6a` | Character-selection code, prompt text, and frame/color tables |
+| `$3e80-$3fff` | Six fast-left/fast-right character sprite frames |
 | `$4000-$47ff` | Source charset 1: custom graphics only, 2 KB |
 | `$4800-$4fff` | Source charset 2: teacher's uppercase font, 2 KB |
-| `$5000-$5358` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| `$5000-$5360` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| `$5400-$630a` | Top-five leaderboard, name entry and disk storage |
 | `$d800-$dbff` | Color RAM |
 
 These fixed addresses are not arbitrary. VIC-IIe character sets and sprite
@@ -213,7 +215,7 @@ cannot silently overwrite graphics data.
 3. Reset fade and spring state, then reset conveyor patterns/counter and install
    their runtime glyphs.
 4. Seed the PRNG, clear score/claim state, and create five initial platforms.
-5. Draw the fixed UI and score, then initialize the POTX display and dial.
+5. Draw the fixed UI and score, then initialize POTX and the character direction indicator.
 6. Place the player on the lowest safe platform.
 7. Initialize SID music.
 8. Copy the complete screen A image into screen B and enable the display.
@@ -226,7 +228,7 @@ the synchronization line, it waits for a later frame without catch-up updates:
 ```text
 wait for the frame boundary
   -> read POTX
-  -> update the five-position hand and digits
+  -> update the five-level character direction indicator and digits
   -> update horizontal movement
   -> update vertical physics and collision
   -> add one point on the first landing on an unclaimed platform
@@ -264,11 +266,11 @@ The eight source rows split into UPPER/LOWER without changing their order, so
 vertical motion is still one pixel per step. Disappearing platforms use separate
 red-brick/gray-mortar glyphs for their three crumbling stages. Conveyors use
 Color RAM=14, with white/blue pairs 01/11 and black 00 in empty fragment rows.
-Spikes use white/green multicolor; text, dial and springs retain hires detail.
+Spikes use white/green multicolor; text and springs retain hires detail.
 
-Hardware supports 256 glyph indices, but the output reserves only 528 bytes,
-so this build uses indices 0..65. This is a memory-layout limit, not an
-ECM limit; SCORE adds four letters at 62..65, with music moved to $2a10.
+Hardware supports 256 glyph indices, but the output reserves 544 bytes for
+indices 0..67. Slots 22..39 are now free for future glyphs; indices above 67
+need a memory-layout change because music starts at $2a20.
 
 ## 8. Why the renderer is double-buffered
 
@@ -369,7 +371,7 @@ VIC sprite X coordinates range from 0 through 511 and require 9 bits:
 - `player_x_low` is written to `$d000`.
 - Bit 0 of `player_x_high` is written to bit 0 of `$d010`.
 
-The dial hand is sprite 4, whose ninth X bit is bit 4 of `$d010`. Player position
+The direction indicator is sprite 4, whose ninth X bit is bit 4 of `$d010`. Player position
 code must modify only bit 0 instead of overwriting the complete register.
 
 The Y coordinate needs only 8 bits. `player_y` is the sprite's top edge, so the
@@ -474,27 +476,26 @@ horizontal display pixels, giving four phases and a 12-frame loop. The texture
 animates even without a passenger and on frames with no upward world movement.
 Its counter is separate from the player's conveyor-push counter.
 
-The allocated 66-glyph character set still uses FULL/LOWER sharing to save space:
+The allocated 68-glyph output keeps separate conveyor FULL, UPPER and LOWER slots:
 
-1. Each direction lets FULL also serve as LOWER during a scroll transition, so
-   only one additional UPPER glyph is required.
-2. FULL occupies body slots 5/6, while UPPER occupies fragment slots 18/19:
-   four slots in total. Modal text no longer aliases any fragment slots.
+1. FULL occupies body slots 5/6, UPPER occupies 18/19, and LOWER occupies
+   66/67. Rebuilding fragments cannot reshape still-visible FULL cells.
+2. Modal text no longer aliases any fragment slots.
    Modal entry installs a complete text page; new-game entry composes custom
    graphics plus HUD text. Neither source charset is ever overwritten.
-3. Each horizontal animation update rebuilds the glyphs for the current vertical
+3. Each horizontal animation update rebuilds the fragments for the current vertical
    phase. A completed coarse scroll restores FULL from the current runtime
    patterns, not the original source, so horizontal animation does not reset.
 
 ## 15. Five-position paddle control
 
-| POTX | Dial position | Horizontal movement |
+| POTX | HUD direction | Horizontal movement |
 | --- | --- | --- |
-| 0..63 | Far left | 2 pixels every 2 frames |
+| 0..63 | Left | 2 pixels every 2 frames |
 | 64..107 | Left | 2 pixels every 3 frames |
-| 108..148 | Center | Stop |
+| 108..148 | Forward | Stop |
 | 149..191 | Right | 2 pixels every 3 frames |
-| 192..255 | Far right | 2 pixels every 2 frames |
+| 192..255 | Right | 2 pixels every 2 frames |
 
 "Every three frames" and "every two frames" come from counter reload values 2
 and 1. The count includes the frame that performs the action, so reloading 2
@@ -579,7 +580,7 @@ screen, the program restores sprite 0's pointer and shows that character's hurt
 frame at a fixed position between the two text rows. No additional hardware
 sprite is consumed.
 
-## 17. Character selection, sprite pointers, and the five-position dial hand
+## 17. Character selection, sprite pointers, and the direction indicator
 
 The sprite pointer table stores an address divided by 64. For example, the
 normal player frame is at `$3000`, so its pointer is `$3000 / 64 = $c0`.
@@ -604,9 +605,10 @@ to compose graphics plus HUD text. Off-center Fire points sprite 0 at the
 selected hurt block for at least 12 frames. Releasing Fire restores the latest
 left/right/normal direction, giving an explicit visual error response.
 
-The dial hand has one writable sprite block; changing position copies one of
-five 63-byte templates into it. The dial face uses characters and consumes no
-hardware sprite.
+During gameplay, sprite 4 displays the selected character's fast-left, left,
+normal, right or fast-right bitmap in the bottom-right panel. The two screen
+buffers receive the same pointer, with no bitmap copy. The former dial's 18
+glyph slots 22..39 are now free.
 
 ## 18. SID raster IRQ
 
@@ -637,7 +639,7 @@ After every change, run at least:
 Then inspect `build/nsshaft-c128.map`:
 
 - `CODE` must end before `$2800`.
-- `CHARSET` must occupy exactly `$2800-$2a0f`.
+- `CHARSET` must occupy exactly `$2800-$2a1f`.
 - `MUSIC` and `EFFECTS` must not overlap the sprite region at `$3000`.
 - `GAMEPLAY` must end inside its linker-script reservation.
 - `EXTCODE` must end before `$3a00`.
@@ -652,7 +654,7 @@ Common problems:
 | Player flashes during screen flips | Sprite pointers in both SCREEN_A and SCREEN_B |
 | HUD moves vertically | Whether `fine_scroll` was incorrectly written to `$d011` |
 | Landing occurs 8 pixels too early | Whether UPPER was incorrectly accepted as support |
-| Dial hand disappears | 63-byte templates and sprite 4 pointer `$3100/64` |
+| HUD character disappears | Sprite 4 enable, ninth X bit, color, and both screen pointers |
 | No sound | `$d01a/$d019`, SID volume, and VICE Sound settings |
 | Second round inherits old state | Whether the new variable is reset from `new_game` |
 | Modal letters become platform fragments | Call `load_text_charset`; use modal `TEXT_*`, not game `CHAR_*` |
@@ -715,7 +717,8 @@ STORE_SCREEN_PAIR SCORE_DISPLAY_OFFSET
 lda potx_label, x
 STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET, x
 
-lda #PADDLE_POINTER_BLOCK
+ldy selected_character
+lda character_normal_blocks, y
 STORE_SPRITE_POINTER 4
 ```
 

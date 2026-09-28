@@ -47,24 +47,26 @@ screens.
 ### Persistent TOP 5
 
 Game over checks the six-digit score before asking for a name. Qualifying
-players enter up to eight letters, digits or spaces: DEL erases and RETURN
-confirms a nonblank name. Equal scores keep older records first. The text-only
-leaderboard highlights the new entry; FIRE returns to character selection.
+players enter up to eight letters, digits or spaces on the keyboard: DEL erases,
+RETURN confirms, and an all-space name is rejected. Tied scores keep older
+records first. The text-only leaderboard highlights the new entry; FIRE returns
+to character selection. No hurt sprite is drawn on these pages.
 
-Use `run-x128.ps1` to run in PAL mode with a persistent writable device-8 disk.
-The launcher creates `saves/nsshaft-scores.d64` only when absent and injects the
-PRG into RAM without replacing the mounted score disk. Keep this disk across
-rebuilds and emulator restarts; close VICE before backing it up. Direct PRG
-autostart alone does not guarantee that this disk is mounted.
+Use `run-x128.ps1`: it creates `saves/nsshaft-scores.d64` only on first launch,
+mounts it as writable device 8, and injects the PRG without replacing that disk.
+Keep this disk to retain scores across program rebuilds and emulator restarts.
+Close VICE before copying it for backup. Hardware users need a writable disk in
+the loading drive (device 8 by default).
 
-The game alternates `NSSHAFT.A` and `NSSHAFT.B` SEQ files, with a version,
-generation and CRC-16. Saves are read back before reporting `SCORES SAVED`;
-startup selects the latest valid slot. On failure, R retries and FIRE continues
-with the in-memory table; unsaved records remain explicitly marked.
+Two small SEQ files, `NSSHAFT.A` and `NSSHAFT.B`, alternate updates. Each has a
+version, generation and CRC; saves are read back before reporting success, and
+the previous valid slot remains as a fallback. On disk failure, R retries and
+FIRE continues with the in-memory table; unsaved scores are explicitly marked.
+Leaderboard code/data starts at `$5400`, outside the packed VIC asset regions.
 
-For C128/Pi1541 use, put the PRG in a writable D64, keep that image mounted
-during play, and safely eject/write back the image before powering off Pi1541.
-Names use the C128 keyboard; gameplay still needs a paddle on control port 1.
+For C128/Pi1541 use, put the PRG in a writable D64 and keep that image mounted
+during play. The game creates its two SEQ files inside the mounted image after
+a qualifying score; wait for the save to finish before powering off Pi1541.
 
 Platform positions and widths use a PRNG seeded from the KERNAL clock, CIA
 timers/TOD and raster timing, mixed with two bytes inside the loaded PRG. Those
@@ -106,7 +108,7 @@ Disappearing platforms use three independent intact/cracked/broken glyph sets
 with Color RAM=10 throughout. Gray mortar progressively becomes black gaps;
 neither the red bricks nor the shared palette flash. Conveyors use Color RAM=14
 for white-and-blue multicolor textures. Spikes use white/green multicolor;
-purple springs, the white dial and text remain hires. Row transitions clear
+purple springs and text remain hires. Row transitions clear
 only the hidden playfield and draw contiguous spans from platform descriptions,
 using one material lookup per span and synchronizing occupied cells' Color RAM.
 Conveyor texture animation runs even without a passenger and on frames when the
@@ -141,8 +143,8 @@ one HP without reducing score. A spike hit consumes one HP and bounces the
 player upward; top-frame contact consumes one HP and drops the player back into
 the shaft. Either hazard is fatal when HP is already zero. An absorbed hit gives
 the selected character's hurt frame priority for 16 PAL frames. The same
-selected hurt frame remains available during gameplay; the game-over screen
-now displays the leaderboard without a character sprite.
+selected hurt frame is used during gameplay; the modal game-over screen now
+uses a text-only leaderboard.
 
 World scrolling uses an 8-bit phase accumulator instead of a whole-frame delay.
 The initial rate is 128/256 pixel per frame, matching the previous actual rate
@@ -166,13 +168,11 @@ Only event timing changes; SID note frequencies are not transposed. A modulo-512
 music phase accumulator represents all five ratios exactly, including 1.25x and
 1.75x.
 
-The bottom of the status panel contains a fixed semicircular dial assembled
-from custom characters and centered to the pixel in its eight columns. Only
-sprite 4 is used for its red hand; no sprite is spent on the dial face. The
-hand bitmap has five discrete angles: far left, left, straight up, right, and
-far right. Its thresholds are 64, 108, 149, and 192, matching the two movement
-speeds and the existing neutral dead zone.
-The divider, POTX display, dial face, and hand remain stationary while the left
+The bottom of the status panel uses sprite 4 to show the selected character's
+existing fast-left, left, normal, right, or fast-right frame. It follows the
+paddle direction and speed, with 108..148 selecting the forward frame.
+No bitmap copy is needed; both screen buffers receive the new sprite pointer.
+The divider, POTX display, and direction indicator remain stationary while the left
 playfield scrolls. The supplied VICE launcher attaches paddles to control port
 1 and maps POTX to the host mouse.
 
@@ -195,25 +195,41 @@ The renderer combines:
   (including fade/spring state), totaling 60 bytes; width zero marks an empty row
 - a hidden-playfield clear and descriptor-driven redraw at the two character
   layout transitions; the six intermediate pixel steps still only update glyphs
-- two screen buffers at `$0400` and `$0c00`
-- native code and state at `$1d00-$2786`
-- a writable 68-glyph mixed-mode output charset at `$2800-$2a1f`
-- SID player and pattern data at `$2a20-$2de2`
-- sprite storage at `$3000-$313f`: Elien's four movement frames and the writable
-  dial hand
-- player physics, ceiling recovery and spring/conveyor code at `$3140-$3779`
-- ceiling drawing, platform generation and HP/damage code at `$3800-$39da`
-- the remaining eleven character frames at `$3a00-$3cbf`: Elien hurt plus all
-  five Ember and five Wasser frames
-- title-selection code, prompt text and character tables at `$3cc0-$3e64`
-- graphics-only source charset at `$4000-$47ff`
-- uppercase text source charset at `$4800-$4fff`, imported from the teacher's font
-- material/collision tables, descriptor effect updates, conveyor animation and charset composition at `$5000-$5360`
-- leaderboard, name entry and disk persistence at `$5400-$630a`
 
-Conveyor FULL glyphs 5/6 no longer double as LOWER fragments: independent LOWER
-glyphs 66/67 prevent fragment rebuilding from reshaping still-visible FULL cells.
-UPPER glyphs remain 18/19. Horizontal animation and player push are unchanged.
+## Memory map (address order)
+
+This table lists the current address ranges in ascending order. Ranges are
+inclusive; the two score-state rows are subranges of `CODE`, not extra space.
+The architecture-grouped view is in `ARCHITECTURE.md`.
+
+| Range | Use |
+| --- | --- |
+| `$00f7-$00fe` | Four two-byte zero-page screen/color scratch pointers; outside the PRG segments |
+| `$0400-$07ff` | Screen buffer A; sprite pointers at `$07f8-$07ff` |
+| `$0c00-$0fff` | Screen buffer B; sprite pointers at `$0ff8-$0fff` |
+| `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
+| `$1d00-$25da` | Core code and writable state: main loop, video, platforms, HUD and scoring (`CODE`) |
+| `$257b-$2580` | Current six score digits, within `CODE` |
+| `$2587-$259a` | 20 per-row first-landing score flags, within `CODE` |
+| `$2800-$2a1f` | Writable 68-slot mixed-mode output charset; slots 22..39 free |
+| `$2a20-$2de2` | SID player, frequency tables and 16-bar arrangement |
+| `$2e00-$2f2c` | Disappearing-platform effect routines |
+| `$3000-$30ff` | First sprite bitmap batch: Elien normal, fall, right and left (four 64-byte frames) |
+| `$3100-$313f` | Free former dial-hand block; no separate HUD bitmap |
+| `$3140-$376d` | Player physics, ceiling recovery and spring/conveyor routines |
+| `$3800-$39da` | Ceiling drawing, weighted platform generation, HP display and spike recovery |
+| `$3a00-$3cbf` | Second sprite bitmap batch: Elien hurt plus five Ember and five Wasser frames (eleven 64-byte frames) |
+| `$3cc0-$3e6a` | Character-selection code, prompt text and frame/color lookup tables |
+| `$3e80-$3fff` | Fast sprite bitmap batch: fast-left and fast-right for Elien, Ember and Wasser (six 64-byte frames) |
+| `$4000-$47ff` | Immutable graphics-only source charset, 2 KB |
+| `$4800-$4fff` | Immutable uppercase text source charset, 2 KB |
+| `$5000-$5360` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| `$5400-$630a` | Top-five leaderboard, name entry, display and disk-storage code/data; entries at `$5af1-$5b36` and disk buffer at `$62bb-$630a` |
+| `$d800-$dbff` | Shared VIC color RAM, not a PRG segment |
+
+The PRG's two-byte load-address header appears at `$1bff-$1c00` in the linker
+map but is not runtime RAM. Its fixed output image is zero-filled through
+`$7fff`; the last allocated segment ends at `$630a`.
 
 Each logical row holds at most one platform, separated from the next platform by
 blank rows. `draw_platform` records its description; coarse scrolling shifts
@@ -227,53 +243,68 @@ the playfield renderer. Glyph RAM and Color RAM remain shared, not double-buffer
 The loop targets one update per PAL frame; polling does not catch up missed
 frames. CPU-cycle comparisons are not a substitute for VIC/IRQ timing checks.
 
-Gameplay enables only hardware sprites 0 (selected character) and 4 (dial
-hand). The title selector temporarily enables sprites 0..2 to preview the three
-characters; the fifteen bitmap frames are memory blocks, not fifteen hardware
-sprites.
+Gameplay enables only hardware sprites 0 (selected character) and 4 (direction
+indicator using the same character frames). The title selector temporarily
+enables sprites 0..2 to preview the three characters; the 21 bitmap frames are
+memory blocks, not 21 hardware sprites.
 
 ## Source layout
 
 The source follows a subsystem-oriented ca65 layout. `src/main.s` contains the
 BASIC loader, C128 bootstrap, new-game setup, and main frame loop. It includes
-small modules for video, platform generation, input, HUD, scoring/difficulty,
-player physics, assets, and mutable state:
+small modules for display, characters, platform logic, audio, scoring and
+leaderboard persistence. The list below groups files by responsibility rather
+than by their literal `.include` order:
 
 ```text
 src/
+  # Entry and shared state
   main.s            program entry and frame orchestration
   constants.inc     hardware addresses and shared layout constants
+  macros.inc        reusable inline assembly operations
+  state.inc         mutable game state bytes
+
+  # Display and charsets
+  video.inc         scrolling, double buffering, modal screens, UI characters
   charset_ids.inc   game glyph IDs and separate modal text codes
   charset.inc       writable output charset and resource includes
   graphics_charset.inc source 1: custom graphics only
   text_charset.inc  source 2: imported uppercase font
   charset_loader.inc range copies and scene-entry composition
-  video.inc         scrolling, double buffering, modal screens, UI characters
+
+  # Characters and controls
+  assets.inc        sprite bitmap batches, charset include and immutable tables
+  character_select.inc title selection, neutral check and character frame tables
+  input.inc         paddle/POTX sampling
+  player.inc        movement, gravity, landing and spike collision
+  hud.inc           character POTX display and sprite direction indicator
+
+  # World and hazards
   platform_materials.inc fragments, colors, transition and collision lookup tables
   platforms.inc     PRNG and platform generation
   platform_rows.inc row descriptions, hidden-playfield clear and span rendering
-  input.inc         paddle/POTX sampling
-  hud.inc           character POTX display and dial hand
-  score.inc         first-landing score, claim rows and scroll-rate scheduler
-  health.inc        HP rewards, decimal HUD and hazard recovery
-  character_select.inc title selection, neutral check and character frame tables
-  player.inc        movement, gravity, landing and spike collision
   fade_platforms.inc disappearing-platform lifecycle and staged crumbling
   spring_platforms.inc spring compression, restoration and upward launch
   conveyor_platforms.inc horizontal texture animation and vertical glyph fragments
+  health.inc        HP rewards, decimal HUD and hazard recovery
+
+  # Audio
   music.inc         raster IRQ, SID instruments and 16-bar music patterns
-  assets.inc        charset include, sprite bitmaps and immutable tables
-  state.inc         mutable game state bytes
+
+  # Scoring and leaderboard
+  score.inc         first-landing score, claim rows and scroll-rate scheduler
+  highscores.inc    top-five ranking, name entry and leaderboard screen
+  highscore_storage.inc dual-slot disk load/save and validation
 ```
 
 See [CHARSET_LAYOUT.md](CHARSET_LAYOUT.md) for the bilingual two-source charset
-design and slot maps. Gameplay imports only
+design, slot maps and compiled-routine regression tests. Gameplay imports only
 the HUD text it needs; modal screens use the complete basic uppercase text page.
 Both inputs ship inside the PRG; no additional disk load or raster split is used.
 
-The repository contains game source, font and sprite assets, build/launch
-scripts, and project documentation. Local tests, audio-analysis tools,
-presentations, archives, caches, and generated build output are excluded.
+The `tests/` directory contains optional charset, platform and leaderboard
+regressions. It is not needed to build or run the PRG. Generated builds, local
+disk images, audio analysis assets and presentation output remain excluded.
 
 See `ARCHITECTURE.md` for the call flow, memory map, sprite allocation, and
 cross-module invariants.
@@ -291,24 +322,22 @@ groups work from the same buildable source tree.
 ## Build and run
 
 Install the [cc65 toolchain](https://cc65.github.io/getting-started.html) and
-[VICE](https://vice-emu.sourceforge.io/). Use the C128 emulator (`x128`) in PAL
-mode. Add the cc65 `bin` directory and VICE `bin` directory to PATH, then run:
+[VICE](https://vice-emu.sourceforge.io/). Put their binaries on PATH, then run:
 
 ```powershell
 .\build.ps1
 .\run-x128.ps1
 ```
 
-Alternatively, supply your own installation paths (no fixed drive is required):
+Or supply installation paths without changing the scripts:
 
 ```powershell
 .\build.ps1 -Cc65Bin 'C:\cc65\bin'
 .\run-x128.ps1 -Cc65Bin 'C:\cc65\bin' -VicePath 'C:\VICE\bin\x128.exe'
 ```
 
-The scripts also accept the `CC65_BIN` and `VICE_X128` environment variables.
-The output is `build/nsshaft-c128.prg`; build output is generated locally.
-All font data required for assembly is included under `assets/fonts/`.
+`CC65_BIN` and `VICE_X128` environment variables are also supported. The
+output is `build/nsshaft-c128.prg`; the font input is under `assets/fonts/`.
 
 On a real C128, use the 40-column video output, load the PRG normally from
 BASIC 7, and run it:

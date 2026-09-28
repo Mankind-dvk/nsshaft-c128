@@ -1,10 +1,10 @@
 ; 字形编号表 / Mixed multicolor/hires glyph allocation
 ; ---------------------------------------------------------------------------
-; GLYPH_* 是字形索引；CHAR_* 是屏幕码。本项目分配前 68 槽，不启用 ECM。
+; GLYPH_* 是字形索引；CHAR_* 是屏幕码。分配前 68 槽，其中 22..39 空闲。
 ; 第一源库只放图形，第二源库提供文字，VIC 始终读取 $2800 的合成结果。
 ; EN: Two immutable inputs -> one live output; Color RAM selects hires/multicolor.
-; Game slots: 0 blank; 1..7 bodies; 8..19 fragments; 20..39 UI/ceiling;
-;             40..55 imported HUD text; 56..61 fade variants; 62..65 SCORE letters.
+; Game slots: 0 blank; 1..7 bodies; 8..19 fragments; 20..21 frame/ceiling;
+;             22..39 free; 40..55 HUD text; 56..61 fade; 62..65 SCORE.
 ;             66..67 independent conveyor LOWER fragments.
 CHARSET_ADDRESS = $2800
 CHARSET_GLYPH_COUNT = 68
@@ -13,7 +13,9 @@ SOURCE_CHARSET_GLYPH_COUNT = 256
 SOURCE_CHARSET_BYTES = SOURCE_CHARSET_GLYPH_COUNT * CHARSET_GLYPH_BYTES
 GRAPHICS_CHARSET_ADDRESS = $4000
 TEXT_CHARSET_ADDRESS = $4800
-GRAPHICS_GLYPH_COUNT = 40
+GRAPHICS_GLYPH_COUNT = 22
+GLYPH_FREE_FIRST = 22
+GLYPH_FREE_COUNT = 18
 MULTICOLOR_CELL = $08
 FADE_STAGE_CRACKED = 0
 FADE_STAGE_BROKEN = 1
@@ -42,10 +44,6 @@ GLYPH_CONVEYOR_RIGHT_UPPER = 19
 
 GLYPH_UI_FRAME = 20
 GLYPH_CEILING_SPIKE = 21
-GLYPH_DIAL_TOP_FIRST = 22          ; six nonblank top-row tiles
-GLYPH_DIAL_MIDDLE_FIRST = 28       ; four nonblank middle-row tiles
-GLYPH_DIAL_BOTTOM_FIRST = 32       ; eight bottom-row tiles
-
 ; 游戏仅抽取 HUD 真正使用的 20 个文字字形；菜单使用独立 TEXT_* 编号。
 ; EN: Import ten digits, H/O/P/T/X/colon and S/C/R/E, not the entire alphabet.
 GLYPH_DIGIT_0 = 40                 ; 40..49 = digits 0..9
@@ -118,9 +116,6 @@ CHAR_E = GLYPH_E
 ; EN: Shared white plus local red bricks or local green spikes.
 CHAR_UI_FRAME = GLYPH_UI_FRAME
 CHAR_CEILING_SPIKE = GLYPH_CEILING_SPIKE
-CHAR_DIAL_ROW_1 = GLYPH_DIAL_TOP_FIRST
-CHAR_DIAL_ROW_2 = GLYPH_DIAL_MIDDLE_FIRST
-CHAR_DIAL_ROW_3 = GLYPH_DIAL_BOTTOM_FIRST
 
 ; 第二源库前 64 项采用 C64 大写屏幕码，不是 ASCII/PETSCII 字符串编码。
 ; 菜单装载整页后用 TEXT_*；这些编号不能直接写入游戏 HUD。
@@ -218,5 +213,6 @@ conveyor_right_source_glyph = GRAPHICS_CHARSET_ADDRESS + GLYPH_CONVEYOR_RIGHT_FU
 
 .assert (CHARSET_ADDRESS & $07ff) = 0, error, "Charset base must be 2 KB aligned"
 .assert GLYPH_CONVEYOR_RIGHT_LOWER < CHARSET_GLYPH_COUNT, error, "Game layout exceeds live charset"
-.assert GLYPH_DIGIT_0 = GRAPHICS_GLYPH_COUNT, error, "HUD must follow custom graphics"
+.assert GLYPH_FREE_FIRST = GRAPHICS_GLYPH_COUNT, error, "Free slots must follow custom graphics"
+.assert GLYPH_DIGIT_0 = GLYPH_FREE_FIRST+GLYPH_FREE_COUNT, error, "HUD must follow free glyph slots"
 .assert TEXT_QUESTION < CHARSET_GLYPH_COUNT, error, "Text page exceeds live charset"

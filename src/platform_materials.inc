@@ -1,7 +1,7 @@
 ; 平台材质与颜色 / Platform materials and Color RAM
 ; ---------------------------------------------------------------------------
 ; 多色砖块使用红、白、黑三色，黑色保留滚动碎片外的空白区域。
-; 文字、表盘和弹簧使用高分辨率字符；传送平台使用白蓝多色纹理。
+; 文字和弹簧使用高分辨率字符；传送平台使用白蓝多色纹理。
 ; EN: Rebuild multicolor rows, preserving black outside the moving platform.
 ; Keep this renderer beside the charset loader, away from tightly packed sprites.
 .segment "CHARSETCODE"
@@ -65,7 +65,8 @@ game_character_colors:
     .res 4, COLOR_PURPLE        ; 12..15 spring fragments
     .byte FADE_CELL_COLOR, FADE_CELL_COLOR, CONVEYOR_CELL_COLOR, CONVEYOR_CELL_COLOR ; 16..19
     .byte UI_FRAME_COLOR, SPIKE_CELL_COLOR ; 20..21
-    .res 34, COLOR_WHITE        ; 22..55 dial and text
+    .res GLYPH_FREE_COUNT, COLOR_BLACK ; 22..39 available for future glyphs
+    .res 16, COLOR_WHITE        ; 40..55 HUD text
     .res 6, FADE_CELL_COLOR     ; 56..61 intact/broken fade variants
     .res 4, COLOR_WHITE         ; 62..65 SCORE letters
     .res 2, CONVEYOR_CELL_COLOR ; 66..67 conveyor LOWER fragments
@@ -123,7 +124,7 @@ platform_colors:
     .byte BRICK_CELL_COLOR, SPIKE_CELL_COLOR, FADE_CELL_COLOR
     .byte COLOR_PURPLE, CONVEYOR_CELL_COLOR, CONVEYOR_CELL_COLOR
 
-; 编译期生成两个 68 项转换表，每个平台查一次 FULL -> LOWER/UPPER。
+; 编译期生成 CHARSET_GLYPH_COUNT 项转换表，每个平台查一次 FULL -> LOWER/UPPER。
 ; EN: FULL -> LOWER; unrelated occupied cells are retained.
 fragment_lower_codes:
 .repeat CHARSET_GLYPH_COUNT, code

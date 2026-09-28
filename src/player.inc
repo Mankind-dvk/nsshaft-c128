@@ -48,15 +48,15 @@ initialize_player:
     sta spawn_row
     jsr position_player_on_platform
 
-    ; POTX 已改为字符 HUD，只启用玩家 sprite 0。
+    ; 先只启用玩家 sprite 0；initialize_dashboard 随后启用方向提示 sprite 4。
     lda #%00000001
     sta VIC_SPRITE_ENABLE
     rts
 
 ; 根据最终的逐帧物理状态选择 sprite 0 的一帧。下落优先于水平输入；
-; 站在平台上时，paddle 死区显示 normal，死区两侧显示 left/right。
+; 站在平台上时按 paddle 五档显示 fastleft/left/normal/right/fastright。
 ; 两张屏幕的指针表必须同步更新，否则 D018 双缓冲翻页时人物会闪回旧帧。
-; EN: Select hurt/fall/normal/left/right bitmap and mirror both pointer tables.
+; EN: Select hurt/fall or one of five directional frames and mirror both pointer tables.
 update_player_sprite_frame:
     ; 输入：player_on_platform 与 potx_raw。输出：同步修改 A/B 两张屏幕的
     ; sprite 0 指针。hurt_timer 非零时受伤帧拥有最高优先级；这里只换位图
@@ -72,22 +72,12 @@ update_player_sprite_frame:
     lda player_on_platform
     beq @fall
 
-    lda potx_raw
-    cmp #POTX_DEADZONE_LOW
-    bcc @left
-    cmp #POTX_DEADZONE_HIGH+1
-    bcs @right
-    lda character_normal_blocks, y
-    bne @store
+    jsr select_direction_sprite_block
+    jmp @store
 
 @fall:
     lda character_fall_blocks, y
     bne @store
-@left:
-    lda character_left_blocks, y
-    bne @store
-@right:
-    lda character_right_blocks, y
 @store:
     STORE_SPRITE_POINTER 0
     rts
@@ -692,7 +682,7 @@ player_movement_ready:
 ; EN: Write the software 9-bit X coordinate without disturbing sprite 4's high bit.
 write_player_x:
     ; 把 9 位软件坐标写入 VIC：低八位写 $d000；高位写 $d010 bit 0。
-    ; AND 只清玩家的 bit 0，绝不能破坏 sprite 4 表针使用的 bit 4。
+    ; AND 只清玩家的 bit 0，不能破坏右侧方向提示 sprite 4 使用的 bit 4。
     lda player_x_low
     sta VIC_SPRITE_0_X
 
