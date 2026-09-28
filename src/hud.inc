@@ -1,22 +1,19 @@
 ; ---------------------------------------------------------------------------
 ; 固定状态栏 HUD
 ; ---------------------------------------------------------------------------
-; POTX 和白色半圆表盘都由固定字符组成，只有红色表针使用 sprite 4。
-; 这样 sprite 1..3、5..7 全部保持空闲；自然 D011 相位也不再需要底端
-; 补齐 sprite。
+; POTX 数字使用固定字符。右下角由 sprite 4 复用当前角色的五档方向帧，
+; 根据 paddle 所在方向显示；sprite 1..3、5..7 保持空闲。
 ;
 ; 公共入口：
 ;   initialize_hud、update_potx_display、initialize_dashboard、
-;   update_dashboard_pointer。
+;   update_dashboard_direction。
 ;
 ; HUD 同时写 SCREEN_A 和 SCREEN_B，因为 $d018 随滚动翻页。Color RAM 只有
-; 一份，不需要双写。表针的五个方向模板位于 assets.inc，每次换档才复制，
-; 档位不变时不会重复搬运 63 字节。
+; 一份，不需要双写。sprite 4 直接复用角色现有位图，只需同步两张指针表。
 ;
 ; English summary:
-;   Renders POTX:xxx into both screen buffers and maintains the fixed character
-;   dial. Only its red hand uses hardware sprite 4. Five pointer templates are
-;   copied into one writable sprite block only when the paddle range changes.
+;   Renders POTX:xxx into both screen buffers. Sprite 4 reuses the selected
+;   character's existing directional frames as a five-level speed indicator.
 
 .segment "CODE"
 
@@ -85,7 +82,7 @@ update_potx_display:
     lda decimal_work
     sta potx_ones
 
-    ; 游戏字符码 40..49 是从第二源库抽取的 0..9；不属于平台碎片区，因此这些字符
+    ; 游戏数字字形从第二源库抽取；不属于平台碎片区，因此这些字符
     ; 始终固定在右上角。
     lda potx_hundreds
     clc
@@ -103,84 +100,59 @@ update_potx_display:
     STORE_SCREEN_PAIR POTX_DISPLAY_OFFSET+7
     rts
 
-; 固定 paddle 仪表盘 --------------------------------------------------------
+; 角色方向提示 --------------------------------------------------------------
 
-; EN: Initialize sprite 4 and force the first five-position hand update.
+; EN: Show the selected character's direction frame in the fixed status panel.
 initialize_dashboard:
-    ; 输出：sprite 4 指向可写的 PADDLE_POINTER_ADDRESS，启用 X 两倍宽并设置
-    ; 固定位置。$d010 的 bit 4 是 sprite 4 的第九个 X 位；bit 0 必须保留给玩家。
-    lda #PADDLE_POINTER_BLOCK
-    STORE_SPRITE_POINTER 4
-
-    ; 只有红色表针使用 sprite；白色半圆表盘由状态栏中的固定自定义字符组成。
-    lda #PADDLE_POINTER_X_LOW
+    ; sprite 4 使用现有角色帧，固定在右下角。X 第九位只改 bit 4，保留玩家 bit 0。
+    lda #HUD_CHARACTER_X_LOW
     sta VIC_SPRITE_4_X
-    lda #PADDLE_POINTER_Y
+    lda #HUD_CHARACTER_Y
     sta VIC_SPRITE_4_Y
 
-    lda #COLOR_RED
+    ldy selected_character
+    lda character_color_table, y
     sta VIC_SPRITE_4_COLOR
 
-    lda VIC_SPRITE_X_HIGH
-    ; 保留玩家 sprite 0 的第九位，清除所有未使用 sprite 的高位。
-    and #%00000001
-    ora #%00010000
-    sta VIC_SPRITE_X_HIGH
-
-    lda #%00010000
-    sta VIC_SPRITE_X_EXPAND
-
-    lda #$ff
-    sta dashboard_pointer_state
-    jsr update_dashboard_pointer
+    SET_REGISTER_BITS VIC_SPRITE_X_HIGH, %00010000
+    CLEAR_REGISTER_BITS VIC_SPRITE_X_EXPAND, %00010000
+    CLEAR_REGISTER_BITS VIC_SPRITE_Y_EXPAND, %00010000
+    jsr update_dashboard_direction
 
     SET_REGISTER_BITS VIC_SPRITE_ENABLE, %00010000
     rts
 
-; 中央继续使用玩家控制的 108..148 死区；两侧再各分出一个最大斜角，得到
-; 最左、左、中、右、最右五档。仅切换指针位图，表盘本身始终不动。
-; EN: Map POTX to one of five templates; copy only when the range changes.
-update_dashboard_pointer:
-    ; 输入：potx_raw。输出：dashboard_pointer_state=0..4，并在档位变化时把
-    ; 对应的 63 字节单色位图复制到 sprite 4 的可写块。
-    ; 这里用连续 CMP 从小到大分区，边界值的归属可直接从 BCC 条件看出。
+; 与人物控制共用五档方向选帧；只切换 sprite 块号。
+; 与 sprite 0 同步写两张屏幕的指针，避免 D018 翻页时方向闪回旧帧。
+update_dashboard_direction:
+    jsr select_direction_sprite_block
+    STORE_SPRITE_POINTER 4
+    rts
+
+; 输入 potx_raw，返回所选角色对应的 sprite 块号 A；Y 会改为角色索引。
+; 边界与 player_movement_ready 的最快档一致，HUD 和角色不会显示不同档。
+select_direction_sprite_block:
+    ldy selected_character
     lda potx_raw
     cmp #POTX_FAR_LEFT_END
-    bcc @far_left
+    bcc @fastleft
     cmp #POTX_DEADZONE_LOW
     bcc @left
     cmp #POTX_DEADZONE_HIGH+1
-    bcc @center
+    bcc @normal
     cmp #POTX_FAR_RIGHT_START
     bcc @right
-    lda #4
-    bne @select
-@far_left:
-    lda #0
-    beq @select
+    lda character_fastright_blocks, y
+    rts
+@fastleft:
+    lda character_fastleft_blocks, y
+    rts
 @left:
-    lda #1
-    bne @select
-@center:
-    lda #2
-    bne @select
+    lda character_left_blocks, y
+    rts
+@normal:
+    lda character_normal_blocks, y
+    rts
 @right:
-    lda #3
-@select:
-    cmp dashboard_pointer_state
-    beq @done
-    sta dashboard_pointer_state
-    tax
-    lda pointer_shape_low, x
-    sta ROW_PTR
-    lda pointer_shape_high, x
-    sta ROW_PTR+1
-
-    ldy #62
-@copy:
-    lda (ROW_PTR), y
-    sta PADDLE_POINTER_ADDRESS, y
-    dey
-    bpl @copy
-@done:
+    lda character_right_blocks, y
     rts

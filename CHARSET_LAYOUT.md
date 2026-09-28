@@ -30,7 +30,7 @@ raster IRQs. Native C128 MMU setup, VIC bank 0, screen buffers, and SID IRQ rema
 
 | 文件 / File | 内容 / Contents |
 | --- | --- |
-| `src/graphics_charset.inc` | 第一源库：平台、碎片初值、边框、表盘；无文字 / source 1, graphics only |
+| `src/graphics_charset.inc` | 第一源库：平台、碎片初值、边框；无文字 / source 1, graphics only |
 | `src/text_charset.inc` | 第二源库的二进制导入 / source 2 binary import |
 | `assets/fonts/c64-upper.bin` | 老师 `c64.bin` 的前 2048 字节，未改像素 / unchanged uppercase half |
 | `src/charset_ids.inc` | 游戏 `GLYPH_*` / `CHAR_*` 与菜单 `TEXT_*` 编号 / separate code namespaces |
@@ -38,11 +38,11 @@ raster IRQs. Native C128 MMU setup, VIC bank 0, screen buffers, and SID IRQ rema
 | `src/charset_loader.inc` | 范围复制、两种场景布局合成 / range copies and scene composition |
 | `src/platform_materials.inc` | 砖/消失台阶碎片、颜色和转场表 / material fragments, colors and transition tables |
 | `src/platform_rows.inc` | 平台描述和隐藏屏区间绘制 / platform descriptions and hidden-screen spans |
-| `src/assets.inc` | Sprite、表盘拼接表、文字屏幕码 / sprites, dial maps, text codes |
+| `src/assets.inc` | 角色 Sprite、文字屏幕码 / character sprites and text codes |
 
 | 地址 / Range | 用途 / Use |
 | --- | --- |
-| `$2800-$2a1f` | 544 字节可写混合模式输出 / writable 68-glyph mixed-mode output |
+| `$2800-$2a1f` | 544 字节可写混合模式输出，含 18 个空闲槽 / 68 slots including 18 free |
 | `$4000-$47ff` | 2048 字节图形源库 / 256-slot immutable graphics source |
 | `$4800-$4fff` | 2048 字节文字源库 / 256-slot immutable text source |
 | `$5000-$5360` | 材质/碰撞查表、描述效果同步、传送带动画和字库合成 / material/collision tables, descriptor effects, conveyor animation and composition |
@@ -50,20 +50,21 @@ raster IRQs. Native C128 MMU setup, VIC bank 0, screen buffers, and SID IRQ rema
 两套源库都保留完整 2 KB 格式，但不直接给 VIC 显示，因而可以放在当前
 16 KB VIC bank 之外。CPU 将所需字形复制到 bank 内的 `$2800`，`$d018`
 仍为 `$1a/$3a`，只随屏幕 A/B 切换。当前关闭 ECM，输出预留前 68 槽；
-SCORE 字母使用 62–65，传送平台 LOWER 使用 66–67，音乐起点移至 `$2a20`。
+22–39 空闲，新增 SCORE 字母使用 62–65，传送带 LOWER 使用 66–67。
+音乐从 `$2a20` 开始，不能在未调整内存布局前使用 68 及以上编号。
 
 Both 2 KB sources are CPU-readable templates outside the active VIC bank. The
 CPU copies selected glyphs into `$2800` inside that bank. `$d018` stays `$1a/$3a`
-for the two screen buffers. ECM is off; 68 glyphs are allocated and music starts at $2a20;
-larger indices would read the adjacent music data rather than valid glyphs.
+for the two screen buffers. ECM is off; 68 slots are allocated, 22..39 are free,
+and music starts at $2a20. Indices 68 and above would reach adjacent music data.
 
 ## 3. 第一源库与游戏布局 / Graphics source and game layout
 
-以下为十进制槽号。第一源库定义 0–39 和 56–61，其余全部补零；文字只能
+以下为十进制槽号。第一源库定义 0–21 和 56–61，其余全部补零；文字只能
 从第二源库抽取，不能再混入第一源库。游戏输出先复制第一源库前 68 槽，
 再将 20 个 HUD 字形放到 40–55 和 62–65。
 
-Slots below are decimal. Source 1 defines 0–39 and 56–61; all other slots are zero.
+Slots below are decimal. Source 1 defines 0–21 and 56–61; all other slots are zero.
 Game output first copies source 1 slots 0–67, then imports 20 HUD glyphs into 40–55 and 62–65.
 
 | 游戏输出槽 / Game slots | 内容 / Contents |
@@ -73,21 +74,19 @@ Game output first copies source 1 slots 0–67, then imports 20 HUD glyphs into 
 | 8–19 | 各平台专用滚动碎片 / Dedicated scrolling fragments |
 | 20 | 红砖白缝 UI 外框和分隔列 / Red-brick, white-mortar frame/divider |
 | 21 | 白绿多色固定倒尖刺 / Fixed white/green multicolor inverted spike |
-| 22–27 | 表盘顶行六个非空块 / Six nonblank dial top tiles |
-| 28–31 | 表盘中行四个非空块 / Four nonblank dial middle tiles |
-| 32–39 | 表盘底行八个块 / Eight dial bottom tiles |
+| 22–39 | 原表盘释放的 18 个空闲槽 / 18 freed glyph slots |
 | 40–49 | 从文字源库抽取的数字 0–9 / Imported digits |
 | 50–55 | 从文字源库抽取的 H O P T X : / Imported HUD letters and colon |
 | 56–58 | 未激活完整红砖灰缝 FULL/UPPER/LOWER / Intact idle fade |
 | 59–61 | 灰缝完全脱落 FULL/UPPER/LOWER / Broken active fade |
 | 62–65 | SCORE 新增字母 S C R E / Additional SCORE letters |
-| 66–67 | 左右传送平台独立 LOWER 碎片 / Independent conveyor LOWER fragments |
+| 66–67 | 左右传送平台的 LOWER 碎片 / Conveyor LOWER fragments |
 
 普通台阶槽 1 和边框槽 20 共用砖纹定义：`$f7,$f7,$55,$7f,$7f,$55,$f7,$f7`。
 开启多色字符模式（D011=$1b，D016=$18），Color RAM=10；位对 00=黑、01=白、
 10=灰、11=红。四列色块各占两个横向像素，图案仍是 8 行，逐行复制保持每次
 上移一像素。滚动碎片未使用的行填 00，避免原 ECM 红/白背景填满空白区域。
-文字、表盘、弹簧的 Color RAM 低于 8，保持单色精细图案。
+文字和弹簧的 Color RAM 低于 8，保持单色精细图案。
 尖刺使用 Color RAM=13，位对 01=白、11=绿。
 弹簧使用 Color RAM=4（紫色）。传送平台使用 Color RAM=14，位对 01=白、11=蓝；裁切区的 00 仍为黑色。
 该混合规则依据 [Commodore 原版手册](https://www.devili.iki.fi/Computers/Commodore/C64/Programmers_Reference/Chapter_3/page_116.html)。
@@ -96,7 +95,7 @@ Normal platform 1 and frame 20 share `$f7,$f7,$55,$7f,$7f,$55,$f7,$f7`.
 D011=$1b/D016=$18 enables mixed-mode characters. Color RAM=10 selects multicolor
 with red local color; pairs 00/01/10/11 mean black/white/gray/red. Empty fragment
 rows use 00; occupied rows copy the source pattern, preserving one-pixel vertical
-motion. Text, dial and springs keep Color RAM below 8 for hires.
+motion. Text and springs keep Color RAM below 8 for hires.
 Spikes use Color RAM=13: pairs 01/11 are white/green.
 Springs use Color RAM=4 (purple). Conveyors use Color RAM=14: pairs 01/11 are white/blue and clipped rows use black 00.
 See the [original color-pair table](https://www.devili.iki.fi/Computers/Commodore/C64/Programmers_Reference/Chapter_3/page_117.html).
@@ -116,9 +115,11 @@ Fixed geometry uses origin Y=50, not the phase-biased moving-platform base 43.
 - 普通砖台阶使用 1/8/9，未激活红砖灰缝台阶使用 56/57/58，不共用碎片。
   Normal bricks use 1/8/9; intact idle fades use independent 56/57/58.
 - 传送平台 FULL 使用 5/6，UPPER 使用 18/19，LOWER 独立使用 66/67。
-  不再复用 FULL/LOWER，避免翻屏前修改仍被旧屏引用的完整字形或下部碎片。
-  Conveyors use separate FULL 5/6, UPPER 18/19 and LOWER 66/67 slots. Coarse
-  scroll refreshes FULL from the current animation phase without reshaping LOWER.
+  碎片重建不会改坏仍在可见屏上的完整平台；粗滚动完成前，FULL 从当前
+  水平动画相位恢复，而不是回到初始图。
+  Conveyor FULL 5/6, UPPER 18/19 and LOWER 66/67 have independent slots.
+  Fragment rebuilding preserves visible FULL cells; restore the current
+  horizontal texture phase at each completed coarse scroll.
 
 向右传送平台源图为 `$5f,$d7,$f5,$7d,$7d,$f5,$d7,$5f`，向左平台使用其水平镜像
 `$f5,$d7,$5f,$7d,$7d,$5f,$d7,$f5`。每行仅反转四个位对的排列，不反转位对内部
@@ -188,11 +189,11 @@ sta COLOR_RAM+10*SCREEN_COLUMNS+12
 ```
 
 实际界面文本仍通过 `STORE_SCREEN_PAIR` 镜像到两张矩阵。菜单清屏用空格32，
-游戏清屏用空白0。排行榜和八字符姓名输入复用此文字页，不显示角色 sprite。
+游戏清屏用空白0。结束界面的排行榜已经复用这张文字页。
 
 Actual UI routines mirror text to both matrices with `STORE_SCREEN_PAIR`.
-Clear modal screens with space 32, game screens with blank 0. The leaderboard
-and eight-character name entry use this text page without character sprites.
+Clear modal screens with space 32, game screens with blank 0. The game-over
+leaderboard already uses this text page.
 
 ## 5. 生命周期和扩展 / Lifecycle and extension
 
@@ -212,7 +213,7 @@ Every new game rebuilds from immutable graphics. Only output glyphs are animated
 The first source is graphics-only; the game output intentionally combines graphics
 and imported HUD text.
 
-新增 HUD 符号时，先扩展当前已用满的 68 槽布局并检查音乐边界，再分配编号并增加
+新增 HUD 符号时，先从当前空闲的 22–39 槽分配编号，再增加
 `COPY_CHARSET_RANGE text_charset, 源编号, 目标编号, 数量`。不要把位图写回
 图形源库。宏会检查源范围和输出 68 槽限制；新增完整游戏中字母表仍需重新
 预算空间，不能因为源库有 256 字形就直接使用 256 种。
@@ -221,22 +222,58 @@ For another HUD symbol, allocate a free game slot and add a range import from
 source 2. Source and destination bounds are asserted. A full in-game alphabet
 still requires a new glyph-slot budget or an explicit output/music memory relocation.
 
-## 6. 构建 / Build
+## 6. 构建和回归 / Build and regression
 
 ```powershell
 .\build.ps1
+python -m pip install -r tests/requirements-charset.txt
+python tests/test_charset.py
+python tests/test_ceiling.py
+python tests/test_brick_platforms.py
+python tests/test_conveyor_material.py
 ```
 
-将 cc65 的 bin 目录加入 PATH，或通过 `-Cc65Bin` 指定工具目录。
-完整构建和 VICE 启动说明见 README.md。字库资源已包含在项目中。
+完整旧版对照另需 `567c2e3` 构建出的 PRG 和标签文件放在独立目录：
+Full baseline comparisons require the PRG and label file built from `567c2e3`:
 
-Add the cc65 bin directory to PATH, or supply it with `-Cc65Bin`.
-See README.md for build and VICE launch instructions. Both font sources are
-included in the project; the build requires no external font files.
+```powershell
+python tests/test_charset.py --baseline-dir D:\path\to\baseline
+```
 
-构建时的断言会检查字库地址、字形数量与内存边界。更改布局后，应重新
-装载生成的 PRG，不要继续使用包含旧布局的模拟器快照。
+测试验证两源/输出边界、跨页和空范围复制、A-Z 与符号、菜单文字调用、三次
+菜单/游戏往返、源库不变、滚动/碰撞/消失平台，以及原有角色帧未变。
+旧 HUD 的字形在对照时先归一化为老师的字体，避免把预期字体差异当成游戏
+回归。旧版像素对照只比较第 3 行以下，屏蔽边框格，并把普通砖台阶归一化为
+同轮廓白色台阶；`test_brick_platforms.py` 不做归一化，单独检查完整砖纹、
+所有滚动相位、顶部裁剪、消失台阶分级脱落不串色和出生台阶。边框砖纹、倒尖刺的固定行、
+像素边界、扣血脱离/受击帧、零 HP 死亡和出生计分索引由 `test_ceiling.py` 单独验证。
+可安装 Pillow 并加 `--render-directory` 输出字符画面。
 
-Assembly assertions check charset addresses, glyph counts, and memory bounds.
-After changing the layout, load the newly built PRG instead of resuming an
-emulator snapshot that still contains the old layout.
+`test_conveyor_material.py` 验证白蓝纹理、每三帧左右循环移位、垂直滚动时
+保留水平相位，以及动画与推人计时独立、碰撞支撑边界不变。
+
+Tests cover source/output boundaries, copies across pages, alphabet/symbols,
+menu calls, repeated scene changes, immutable sources, scrolling/collision/fade,
+and unchanged original character frames. Old HUD glyphs are normalized to the teacher's font
+for pixel comparisons. Legacy comparisons exclude the new ceiling row and
+mask changed frame cells and normalize normal-platform texture to its old solid
+silhouette. Dedicated brick tests compare raw pixels through all phases, top
+clipping, fade-stage isolation and spawning. Dedicated ceiling tests verify exact frame
+pixels, geometry, persistence, HP recovery/hurt frames, zero-HP death, and seed/score boundaries.
+Optional Pillow plus `--render-directory` saves renders.
+
+Dedicated conveyor tests cover exact white/blue pixels, three-frame circular
+shifts, horizontal-phase preservation while scrolling vertically, independent
+animation/push timers, and unchanged collision/support bounds.
+
+可用改材质前独立保存的 PRG/标签执行周期对照（只统计 6502 指令周期，不等于
+VICE 帧率测量）：`python tests/test_brick_platforms.py --baseline-dir D:\path\to\pre-brick-build`。
+An optional pre-brick build enables the eight-pixel CPU-cycle regression; this
+does not model VIC bus stealing, interrupts or frame rate.
+
+这些是编译后 6502 例程测试，不模拟 VIC 光栅时序、MMU 或 SID。VICE 和真机
+验收请重新装载新版 PRG，不要继续使用包含旧布局的快照。教师原文件未修改。
+
+These compiled-routine tests do not emulate VIC timing, MMU or SID. VICE/hardware
+acceptance should load the new PRG, not resume an old-layout snapshot. The
+teacher's original files remain unchanged.

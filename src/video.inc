@@ -2,7 +2,8 @@
 ; VIC-IIe 屏幕系统
 ; ---------------------------------------------------------------------------
 ; 本模块负责平台逐像素平滑过渡、双缓冲屏幕复制、开始/结束画面、固定列
-; 分隔条，以及字符表盘的放置。硬件 D011 固定在 25 行模式的自然相位 3；
+; 分隔条。右下角角色方向提示由 hud.inc 中的 sprite 4 实现。
+; 硬件 D011 固定在 25 行模式的自然相位 3；
 ; 平滑运动改由实时改写各平台类型的上下过渡字形实现。
 ;
 ; 公共入口：
@@ -358,9 +359,9 @@ clear_screens_with_character:
 ; 固定字符框：硬件边框为黑色，屏幕第 1/23 行与第 1/38 列组成砖纹外框，
 ; 第 29 列分隔游戏区和八列状态栏。倒尖刺固定在第 2 行游戏区；第 0/24 行
 ; 以及第 0/39 列保留黑色，形成参考图中的外侧留白。
-; EN: Draw the brick frame/divider, fixed character dial and white/green ceiling spikes.
+; EN: Draw the brick frame/divider and white/green ceiling spikes.
 initialize_ui:
-    ; 输出：两张屏幕都有相同的砖纹框、分隔列、POTX 区、字符表盘和倒尖刺。
+    ; 输出：两张屏幕都有相同的砖纹框、分隔列和倒尖刺。
     ; 水平线适合绝对地址+X；垂直线适合三个行指针+固定 Y 列，这展示了两种
     ; 常见的 6502 屏幕遍历方式。
     ; 先画上下两条水平框线。
@@ -410,35 +411,6 @@ initialize_ui:
     dex
     bne @vertical
 
-    ldx #0
-@dial_row_1:
-    lda dial_row_1, x
-    STORE_SCREEN_PAIR DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    lda #COLOR_WHITE
-    sta COLOR_RAM+DIAL_TOP_ROW*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    inx
-    cpx #8
-    bne @dial_row_1
-
-    ldx #0
-@dial_row_2:
-    lda dial_row_2, x
-    STORE_SCREEN_PAIR (DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    lda #COLOR_WHITE
-    sta COLOR_RAM+(DIAL_TOP_ROW+1)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    inx
-    cpx #8
-    bne @dial_row_2
-
-    ldx #0
-@dial_row_3:
-    lda dial_row_3, x
-    STORE_SCREEN_PAIR (DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    lda #COLOR_WHITE
-    sta COLOR_RAM+(DIAL_TOP_ROW+2)*SCREEN_COLUMNS+DIAL_FIRST_COLUMN, x
-    inx
-    cpx #8
-    bne @dial_row_3
     jmp draw_ceiling_spikes
 
 ; EN: Add one 40-byte row to ROW_PTR only.

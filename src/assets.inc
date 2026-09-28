@@ -1,10 +1,11 @@
 ; ---------------------------------------------------------------------------
 ; 图形资源与不可变游戏数据
 ; ---------------------------------------------------------------------------
-; c128-prg.cfg 将 CHARSET 固定在 $2800，将 Elien 四帧与表针固定在 $3000，
-; 并将 Elien hurt、Ember/Wasser 全套帧固定在 $3a00-$3cbf。
+; c128-prg.cfg 将 CHARSET 固定在 $2800，将 Elien 四帧固定在 $3000，
+; 将 Elien hurt、Ember/Wasser 原有帧固定在 $3a00-$3cbf，
+; 六张高速方向帧固定在 $3e80-$3fff。
 ; charset.inc 引入图形源库、文字源库及合成例程，编号放在 charset_ids.inc。
-; 运行时代码只改写标明的动态字形和 paddle 指针 sprite 缓冲区；POT 数字
+; 运行时代码只改写标明的动态字形；POT 数字
 ; 更新的是屏幕码，不是数字字形。其余字节均为不可变模板。
 ;
 ; 初学者提示：每个字符固定 8 字节，每个字节是一条从左到右的像素行，bit 7
@@ -16,7 +17,7 @@
 ;   remaining character frames at $3a00-$3cbf. A character is eight bytes with
 ;   bit 7 at the left. A monochrome sprite is 24x21 pixels (63 bytes) plus one
 ;   alignment byte. Labels
-;   marked as runtime glyphs or writable dial storage may change; all other bytes
+;   marked as runtime glyphs may change; all other bytes
 ;   are immutable templates and lookup tables.
 
 .include "charset.inc"
@@ -71,13 +72,8 @@ player_left_sprite:
 .assert player_fall_sprite = PLAYER_FALL_ADDRESS, error, "fall sprite address changed"
 .assert player_right_sprite = PLAYER_RIGHT_ADDRESS, error, "right sprite address changed"
 .assert player_left_sprite = PLAYER_LEFT_ADDRESS, error, "left sprite address changed"
-.assert * = PADDLE_POINTER_ADDRESS, error, "player sprite frames must occupy four 64-byte blocks"
-
-; Sprite 4 位于可写 RAM。根据玩家移动使用的同一 paddle 分档，将五种
-; 表针形状之一复制到此处。
-paddle_pointer_sprite:
-    .res 63, 0
-    .byte 0
+.assert * = $3100, error, "player sprite frames must occupy four 64-byte blocks"
+; $3100-$313f 不再存表针；sprite 4 直接指向所选角色已有的位图块。
 
 .segment "PLAYERSETS"
 
@@ -213,63 +209,84 @@ player_sets_end:
 .assert wasser_hurt_sprite = WASSER_HURT_ADDRESS, error, "Wasser hurt address changed"
 .assert player_sets_end = PLAYER_SETS_END_ADDRESS, error, "player sets must end before select code"
 
+; 来自 highsprites.txt 的左右高速帧。Spritemate 的第 64 字节是颜色元数据，
+; 这里统一改成 0 作为对齐填充；实际颜色仍由角色颜色寄存器控制。
+; 六帧连续占用 $3e80-$3fff。玩家 sprite 0 与 HUD sprite 4 直接复用这些块。
+.segment "FASTSPRITES"
+
+player_fastleft_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$7e,$00,$01,$ff,$f0
+    .byte $03,$ff,$f0,$07,$ff,$c0,$0f,$ff
+    .byte $fc,$0c,$f3,$fc,$0c,$f3,$e0,$1c
+    .byte $f3,$e0,$1c,$f3,$fe,$1f,$ff,$fe
+    .byte $1f,$ff,$f0,$1f,$ff,$fc,$03,$81
+    .byte $c0,$03,$81,$c0,$03,$81,$c0,$00
+
+player_fastright_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$7e,$00,$0f,$ff,$80
+    .byte $0f,$ff,$c0,$03,$ff,$e0,$3f,$ff
+    .byte $f0,$3f,$cf,$30,$07,$cf,$30,$07
+    .byte $cf,$38,$7f,$cf,$38,$7f,$ff,$f8
+    .byte $0f,$ff,$f8,$3f,$ff,$f8,$03,$81
+    .byte $c0,$03,$81,$c0,$03,$81,$c0,$00
+
+ember_fastleft_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$3f,$f0,$00
+    .byte $ff,$e0,$03,$ff,$fc,$07,$ff,$fe
+    .byte $0f,$ff,$f0,$0f,$ff,$e0,$1f,$ff
+    .byte $f0,$1f,$ff,$fc,$1c,$f3,$ff,$1c
+    .byte $f3,$fe,$1c,$f3,$f8,$0c,$f3,$f0
+    .byte $0f,$ff,$e0,$07,$ff,$f8,$03,$ff
+    .byte $fe,$01,$c3,$f8,$01,$c3,$80,$00
+
+ember_fastright_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$0f,$fc,$00,$07
+    .byte $ff,$00,$3f,$ff,$c0,$7f,$ff,$e0
+    .byte $0f,$ff,$f0,$07,$ff,$f0,$0f,$ff
+    .byte $f8,$3f,$ff,$f8,$ff,$cf,$38,$7f
+    .byte $cf,$38,$1f,$cf,$38,$0f,$cf,$30
+    .byte $07,$ff,$f0,$1f,$ff,$e0,$7f,$ff
+    .byte $c0,$1f,$c3,$80,$01,$c3,$80,$00
+
+wasser_fastleft_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$ff,$da,$03,$f1
+    .byte $f0,$07,$fe,$fa,$0f,$ff,$70,$0f
+    .byte $ff,$be,$1c,$f3,$b8,$1c,$f3,$be
+    .byte $1c,$f3,$be,$1c,$f3,$f8,$0f,$ff
+    .byte $f0,$07,$ff,$f8,$03,$ff,$fd,$00
+
+wasser_fastright_sprite:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$5b,$ff,$00,$0f,$8f
+    .byte $c0,$5f,$7f,$e0,$0e,$ff,$f0,$7d
+    .byte $ff,$f0,$1d,$cf,$38,$7d,$cf,$38
+    .byte $7d,$cf,$38,$1f,$cf,$38,$0f,$ff
+    .byte $f0,$1f,$ff,$e0,$bf,$ff,$c0,$00
+
+fast_sprites_end:
+.assert player_fastleft_sprite = PLAYER_FASTLEFT_ADDRESS, error, "Elien fast-left address changed"
+.assert player_fastright_sprite = PLAYER_FASTRIGHT_ADDRESS, error, "Elien fast-right address changed"
+.assert ember_fastleft_sprite = EMBER_FASTLEFT_ADDRESS, error, "Ember fast-left address changed"
+.assert ember_fastright_sprite = EMBER_FASTRIGHT_ADDRESS, error, "Ember fast-right address changed"
+.assert wasser_fastleft_sprite = WASSER_FASTLEFT_ADDRESS, error, "Wasser fast-left address changed"
+.assert wasser_fastright_sprite = WASSER_FASTRIGHT_ADDRESS, error, "Wasser fast-right address changed"
+.assert fast_sprites_end = $4000, error, "fast sprites must end at VIC bank boundary"
+
 .segment "CODE"
 
 potx_label:
     .byte CHAR_P, CHAR_O, CHAR_T, CHAR_X, CHAR_COLON
-
-; 复制到可写 sprite 4 缓冲区的 paddle 表针模板。两张地址表分别保存低/高
-; 字节；update_dashboard_pointer 用相同 X 索引组合出一个 16 位源指针。
-pointer_shape_low:
-    .byte <pointer_left_shape, <pointer_left_inner_shape
-    .byte <pointer_center_shape, <pointer_right_inner_shape
-    .byte <pointer_right_shape
-pointer_shape_high:
-    .byte >pointer_left_shape, >pointer_left_inner_shape
-    .byte >pointer_center_shape, >pointer_right_inner_shape
-    .byte >pointer_right_shape
-
-pointer_left_shape:
-    .res 18, 0
-    .byte $10,$00,$00, $08,$00,$00, $08,$00,$00, $04,$00,$00
-    .byte $02,$00,$00, $01,$00,$00, $01,$00,$00, $00,$80,$00
-    .byte $00,$40,$00, $00,$20,$00, $00,$30,$00, $00,$38,$00
-    .byte $00,$10,$00
-    .res 6, 0
-
-; 左内档：方向位于垂直与最左档之间，尖端约向左偏四个像素。
-pointer_left_inner_shape:
-    .res 12, 0
-    .byte $01,$00,$00, $01,$00,$00, $00,$80,$00, $00,$80,$00
-    .byte $00,$80,$00, $00,$40,$00, $00,$40,$00, $00,$40,$00
-    .byte $00,$20,$00, $00,$20,$00, $00,$20,$00, $00,$10,$00
-    .byte $00,$38,$00, $00,$10,$00, $00,$10,$00
-    .res 6, 0
-
-pointer_center_shape:
-    .res 9, 0
-    .byte $00,$10,$00, $00,$10,$00, $00,$10,$00, $00,$10,$00
-    .byte $00,$10,$00, $00,$10,$00, $00,$10,$00, $00,$10,$00
-    .byte $00,$10,$00, $00,$10,$00, $00,$10,$00, $00,$10,$00
-    .byte $00,$10,$00, $00,$10,$00, $00,$38,$00, $00,$10,$00
-    .res 6, 0
-
-; 右内档与左内档镜像。
-pointer_right_inner_shape:
-    .res 12, 0
-    .byte $00,$01,$00, $00,$01,$00, $00,$02,$00, $00,$02,$00
-    .byte $00,$02,$00, $00,$04,$00, $00,$04,$00, $00,$04,$00
-    .byte $00,$08,$00, $00,$08,$00, $00,$08,$00, $00,$10,$00
-    .byte $00,$38,$00, $00,$10,$00, $00,$10,$00
-    .res 6, 0
-
-pointer_right_shape:
-    .res 18, 0
-    .byte $00,$00,$08, $00,$00,$10, $00,$00,$20, $00,$00,$20
-    .byte $00,$00,$40, $00,$00,$80, $00,$01,$00, $00,$02,$00
-    .byte $00,$04,$00, $00,$04,$00, $00,$18,$00, $00,$38,$00
-    .byte $00,$10,$00
-    .res 6, 0
 
 ; 地址表、屏幕码行和开始/结束画面文字。初始平台地址拆成 low/high 两表，
 ; 是 6502 常见的“结构分离数组”：用同一个 X 同时取出一个 16 位地址。
@@ -298,22 +315,6 @@ platform_chars:
     .byte CHAR_CONVEYOR_RIGHT_FULL
 platform_chars_end:
 .assert platform_chars_end-platform_chars = PLATFORM_TYPE_COUNT, error, "platform type table size mismatch"
-
-dial_row_1:
-    .byte CHAR_BLANK, CHAR_DIAL_ROW_1+0
-    .byte CHAR_DIAL_ROW_1+1, CHAR_DIAL_ROW_1+2
-    .byte CHAR_DIAL_ROW_1+3, CHAR_DIAL_ROW_1+4
-    .byte CHAR_DIAL_ROW_1+5, CHAR_BLANK
-dial_row_2:
-    .byte CHAR_DIAL_ROW_2+0, CHAR_DIAL_ROW_2+1
-    .byte CHAR_BLANK, CHAR_BLANK
-    .byte CHAR_BLANK, CHAR_BLANK
-    .byte CHAR_DIAL_ROW_2+2, CHAR_DIAL_ROW_2+3
-dial_row_3:
-    .byte CHAR_DIAL_ROW_3+0, CHAR_DIAL_ROW_3+1
-    .byte CHAR_DIAL_ROW_3+2, CHAR_DIAL_ROW_3+3
-    .byte CHAR_DIAL_ROW_3+4, CHAR_DIAL_ROW_3+5
-    .byte CHAR_DIAL_ROW_3+6, CHAR_DIAL_ROW_3+7
 
 start_title:
     .byte TEXT_N, TEXT_S, TEXT_DASH, TEXT_S

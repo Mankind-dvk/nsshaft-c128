@@ -2,7 +2,7 @@
 ; ---------------------------------------------------------------------------
 ; 与老师示例的 outputCharsetStart 对应。源库并不直接拿来显示：场景入口把
 ; 需要的字形复制到本区，游戏帧循环只更新这里的动态碎片，不再改写文字源库。
-; EN: One 68-glyph mixed-mode output assembled from two immutable source charsets.
+; EN: One 68-slot mixed-mode output, including 18 unused slots at 22..39.
 .segment "CHARSET"
 charset_begin:
     .res CHARSET_GLYPH_COUNT*CHARSET_GLYPH_BYTES, 0

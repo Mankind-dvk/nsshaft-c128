@@ -77,7 +77,7 @@ start:
     sta VIC_SPRITE_ENABLE
 
     ; 混合多色/单色字符：关闭 ECM，每格 Color RAM bit 3 决定解释方式。
-    ; 自然相位 3 不变；砖台阶和尖刺为多色，文字、表盘等仍为单色。
+    ; 自然相位 3 不变；砖台阶和尖刺为多色，文字和弹簧仍为单色。
     lda #$18
     sta VIC_CONTROL_2
     lda #VIC_CONTROL_1_TEXT
@@ -165,7 +165,7 @@ main_loop:
     ; 的一像素上移由定点相位累加器控制；首次落到新平台时才增加分数。
     jsr wait_for_frame
     jsr read_paddle_x
-    jsr update_dashboard_pointer
+    jsr update_dashboard_direction
     jsr update_potx_display
     jsr update_player_horizontal
     jsr update_player_vertical

@@ -1,20 +1,25 @@
-; Native C128 sequential-file persistence. Call bootstrap once, before the
-; game uses zero page. Call load/save only with music stopped (CIA IRQs disabled).
-; Both routines preserve game ZP, mapping, CPU ports and CIA port/timer setup.
-; A/X/Y are scratch. C=0 success, C=1 failure. load leaves the table unchanged
-; unless a fully validated slot was found. status: 0 OK, 1 first run (no files),
-; 2 load failure, 3 save failure. A valid backup still counts as a successful load.
+; 排行榜底层：通过 C128 KERNAL 顺序文件接口保存，不调用 BASIC 或屏幕编辑器。
+; 建议先看 highscore_storage_save/load，其余是环境保护、文件操作和校验辅助函数。
+; 分区：格式 / 启动快照 / 读写主流程 / 环境切换 / 通道 / 文件读写 / 校验 / 数据。
+; bootstrap 在游戏使用零页之前调用一次；load/save 仅在音乐停止、CIA IRQ 关闭后调用。
+; A/X/Y 可被改写；返回 C=0 成功、C=1 失败。未找到有效文件时，不覆盖内存成绩。
+; status：0=成功，1=首次运行无文件，2=读取失败，3=保存失败；有效备份也算读取成功。
 ;
-; Each 80-byte SEQ file holds NSHS, version, count, generation LE, 70 record
-; bytes, CRC-16/CCITT LE. A/B alternate; the current valid slot is NEVER scratched.
-; Success requires CLOSE, DOS status 00, then exact read-back verification.
-; No LOAD/SAVE headers and no BASIC/screen-editor calls are involved.
+; 两份 SEQ 文件各 80 字节，A/B 交替写入，绝不先删掉当前有效的那份。
+; 保存成功要求：关闭文件、DOS 状态为 00、重新读取并核对全部内容。
+; 文件偏移（不包含 PRG 加载地址）：
+;   0..3  "NSHS" 标识       4       格式版本（1）
+;   5     有效记录数         6..7    保存序号，低字节在前
+;   8..77 五条成绩           78..79  CRC，低字节在前
+; CRC 只覆盖 0..77，用于发现损坏，不是加密；A/B 也不能保证整张磁盘绝对抗掉电。
 
 .segment "HIGHSCORES"
 
+; === 1. 文件格式常量与 KERNAL 入口地址 ===
 HS_DISK_BYTES = 80
 HS_DISK_CRC_OFFSET = 78
 HS_DISK_RECORD_OFFSET = 8
+; 14/15 是程序使用的逻辑文件号，不是磁盘驱动器的设备号。
 HS_DISK_FILE = 14
 HS_DISK_COMMAND = 15
 HS_DISK_ZP_FIRST = $02
@@ -32,6 +37,9 @@ HS_K_CLRCHN = $ffcc
 HS_K_CHRIN = $ffcf
 HS_K_CHROUT = $ffd2
 
+; === 2. 启动快照：保留系统原有的零页工作区 ===
+; 必须在游戏占用零页前调用，且先映射本段 RAM，否则 BASIC ROM 可能遮住代码。
+; 从 $ba 沿用加载程序的设备号；只接受 8..30，否则保持默认设备 8。
 highscore_storage_bootstrap:
     ldx #0
 @copy:
@@ -53,6 +61,9 @@ highscore_storage_bootstrap:
 @default_device:
     rts
 
+; === 3. 读写主流程：先看这部分，再按需追踪下方辅助函数 ===
+; 读取：分别验证 A/B，选择较新的有效文件；另一份缺失或损坏不妨碍使用好的一份。
+; 只有通过完整验证的候选文件，才能替换内存排行榜。
 highscore_storage_load:
     php
     sei
@@ -73,7 +84,8 @@ highscore_storage_load:
     lda hs_disk_active_slot
     cmp #$ff
     beq @accept
-    ; Modular 16-bit sequence ordering remains valid across $ffff -> $0000.
+    ; 用 16 位序号差判断新旧，支持 $ffff 回到 $0000。
+    ; 前提是序号相差小于 $8000；正常交替保存时，两份有效记录只差一代。
     lda hs_disk_buffer+6
     sec
     sbc hs_disk_generation
@@ -100,6 +112,7 @@ highscore_storage_load:
     bpl @copy
     jmp @next
 @failed_slot:
+    ; DOS 62 是文件不存在，首次运行很正常；与通信失败、格式损坏区分处理。
     lda hs_disk_error
     cmp #62
     beq @next
@@ -129,6 +142,9 @@ highscore_storage_load:
     sta highscore_storage_status
     jmp hs_disk_failure
 
+; 保存：只替换非当前有效的槽位（首次写 A），保留上一份有效记录。
+; 顺序：删目标旧文件 -> 打包 -> 写入并关闭 -> 回读校验 -> 更新有效槽位和序号。
+; highscore_dirty 由上层维护；这里失败返回 C=1，不清除未保存标记。
 highscore_storage_save:
     php
     sei
@@ -150,6 +166,7 @@ highscore_storage_save:
     bcs @failed
     jsr hs_disk_read_slot
     bcs @failed
+    ; CRC 正确还不够：必须与本次序号、条数及全部成绩一致，防止误认旧文件为新存档。
     lda hs_disk_expected_generation
     cmp hs_disk_buffer+6
     bne @failed
@@ -183,6 +200,7 @@ highscore_storage_save:
     sta highscore_storage_status
     jmp hs_disk_failure
 
+; 无论成功失败都先恢复游戏环境，再用进位标志 C 返回结果。
 hs_disk_success:
     jsr hs_disk_leave
     plp
@@ -194,6 +212,9 @@ hs_disk_failure:
     sec
     rts
 
+; === 4. 环境切换：游戏与 KERNAL 分别保留自己的零页 ===
+; 暂存游戏的映射、端口、速度及 CIA 配置，恢复系统零页，磁盘通信期间强制 1 MHz。
+; 两套零页快照不能混用，否则系统文件变量和游戏指针会互相覆盖。
 hs_disk_enter:
     lda MMU_CONFIG
     sta hs_disk_saved_mmu
@@ -238,7 +259,7 @@ hs_disk_enter:
     inx
     cpx #HS_DISK_ZP_BYTES
     bne @zp
-    ; SETBNK uses bank numbers, NOT literal MMU configurations.
+    ; SETBNK 参数是 RAM bank 编号，不是直接写入 MMU 的配置值。
     lda #0
     tax
     jsr HS_K_SETBNK
@@ -249,8 +270,10 @@ hs_disk_enter:
     sta hs_disk_data_open
     rts
 
+; 留下 KERNAL 更新后的零页供下次读写，再恢复游戏零页和硬件配置。
+; 这不是游戏运行中任意时刻可用的现场恢复：不保证定时器相位原样连续，CIA IRQ 仍关闭。
 hs_disk_leave:
-    ; Music is stopped at every public call; leave both CIA IRQ masks disabled.
+    ; 上层已经停止音乐；返回时保持两颗 CIA 的中断禁用，并清除挂起状态。
     lda #$7f
     sta $dc0d
     sta $dd0d
@@ -294,6 +317,8 @@ hs_disk_leave:
     sta MMU_CONFIG
     rts
 
+; === 5. KERNAL 通道与驱动器状态 ===
+; 次级地址 15 用于 DOS 命令/状态，次级地址 2 用于文件内容；不同于物理设备号。
 hs_disk_open_command:
     lda #0
     jsr HS_K_SETNAM
@@ -305,7 +330,7 @@ hs_disk_open_command:
     bcs @failed
     lda #1
     sta hs_disk_command_open
-    ; Consume power-on/prior DOS status. The next operation gets fresh status.
+    ; 先读走开机或上次操作的状态，后续才能拿到本次操作的新状态。
     jsr hs_disk_dos_status
     lda hs_disk_error
     cmp #$ff
@@ -338,8 +363,9 @@ hs_disk_close_data:
 @done:
     rts
 
-; Return decimal DOS status in hs_disk_error, $ff for IEC/invalid response.
-; Only 00 is C=0. Scratch separately also accepts 01 FILES SCRATCHED.
+; hs_disk_error 返回十进制 DOS 状态码，$ff 表示 IEC 通信失败或无效响应。
+; 这里只把 00 作为成功；删除文件的调用者另外接受 01（FILES SCRATCHED）。
+; 解析前两位 ASCII 数字，再读到回车清掉本行；尾部最多读 64 字符，避免无休止读取。
 hs_disk_dos_status:
     lda #$ff
     sta hs_disk_error
@@ -399,6 +425,8 @@ hs_disk_dos_status:
     clc
     rts
 
+; === 6. 文件操作与打包：每个辅助函数只负责一个步骤 ===
+; 根据目标槽位同时修改文件名和删除命令中的 A/B 字母。
 hs_disk_set_slot_names:
     lda hs_disk_slot
     clc
@@ -407,6 +435,7 @@ hs_disk_set_slot_names:
     sta hs_disk_scratch_slot_char
     rts
 
+; 文件名中的 S 表示 SEQ；模式字符由读写调用者设置为 R 或 W。
 hs_disk_open_data:
     jsr hs_disk_set_slot_names
     lda #hs_disk_filename_end-hs_disk_filename
@@ -428,6 +457,8 @@ hs_disk_open_data:
     sec
     rts
 
+; 必须恰好读到 80 字节：结束标志 EOI（$40）只能随最后一字节到达。
+; 提前结束或还有多余内容都拒绝；READST 的其他状态位作为通信错误处理。
 hs_disk_read_slot:
     lda #'R'
     sta hs_disk_filename_mode
@@ -470,6 +501,8 @@ hs_disk_read_slot:
     sec
     rts
 
+; 仅删除 save 选出的非当前槽位，绝不先删当前有效备份。
+; DOS 01（FILES SCRATCHED）表示删除完成，此处也算成功。
 hs_disk_scratch_slot:
     jsr hs_disk_set_slot_names
     ldx #HS_DISK_COMMAND
@@ -501,6 +534,8 @@ hs_disk_scratch_slot:
     sec
     rts
 
+; 组装下一代存档，但暂不更新已确认的序号；验证成功后才提交。
+; 固定复制五条记录，实际有效条数由 count 决定；最后补上 CRC。
 hs_disk_build_buffer:
     ldx #3
 @magic:
@@ -534,6 +569,8 @@ hs_disk_build_buffer:
     sta hs_disk_buffer+HS_DISK_CRC_OFFSET+1
     rts
 
+; CHROUT 成功只说明发送过程未报错；关闭文件后还要检查驱动器 DOS 状态。
+; 上层 save 随后重新打开并核对内容，不能在这里直接认定永久保存成功。
 hs_disk_write_slot:
     lda #'W'
     sta hs_disk_filename_mode
@@ -561,7 +598,10 @@ hs_disk_write_slot:
     sec
     rts
 
-; Reject malformed bytes and ascending scores, not just bad checksums.
+; === 7. 存档验证：校验值正确之外，还要确认内容合法 ===
+; 依次检查 CRC、标识、版本、条数、姓名和数字，再检查排名顺序。
+; 姓名允许屏幕码 1..26、数字 48..57、空格 32，至少有一个非空格字符。
+; 只检查 count 条有效记录；未使用的槽位允许保持全零。
 hs_disk_validate_buffer:
     jsr hs_disk_crc16
     lda hs_disk_crc
@@ -627,6 +667,7 @@ hs_disk_validate_buffer:
     sec
     rts
 
+; 相邻成绩必须从高到低，同分合法；查排名算法依赖这个顺序，因此读档时必须检查。
 hs_disk_validate_order:
     lda hs_disk_buffer+5
     cmp #2
@@ -661,7 +702,8 @@ hs_disk_validate_order:
     sec
     rts
 
-; CRC-16/CCITT-FALSE: initial $ffff, polynomial $1021, no final XOR.
+; CRC-16/CCITT-FALSE：初值 $ffff，多项式 $1021，末尾不再异或。
+; 每字节先异或到高八位，再移位八次；移出 1 时异或多项式。末尾两个 CRC 字节不参与。
 hs_disk_crc16:
     lda #$ff
     sta hs_disk_crc
@@ -690,6 +732,8 @@ hs_disk_crc16:
     bcc @byte
     rts
 
+; === 8. 文件名、状态与工作缓冲区 ===
+; 状态：0=成功，1=没有旧存档，2=读取失败，3=保存失败。
 highscore_storage_status: .byte 1
 highscore_storage_device: .byte 8
 hs_disk_magic: .byte "NSHS"
@@ -701,6 +745,8 @@ hs_disk_filename_end:
 hs_disk_scratch: .byte "S0:NSSHAFT."
 hs_disk_scratch_slot_char: .byte "A",13
 hs_disk_scratch_end:
+; 槽位 0=A、1=B、$ff=尚无有效存档。当前有效槽位与本次目标槽位分开，
+; 防止写入失败时把未经验证的文件当成当前存档。
 hs_disk_active_slot: .byte $ff
 hs_disk_slot: .byte 0
 hs_disk_generation: .word 0
@@ -729,6 +775,8 @@ hs_disk_saved_crb: .byte 0
 hs_disk_saved_cia2_port: .byte 0
 hs_disk_saved_cia2_ddr: .byte 0
 hs_disk_saved_cia1: .res 8,0
+; 两份各 254 字节的快照，隔离 KERNAL 和游戏在 $02..$ff 的工作状态。
+; $00/$01 是 CPU 端口寄存器，单独保存恢复，不按普通 RAM 复制。
 hs_disk_kernal_zp: .res HS_DISK_ZP_BYTES,0
 hs_disk_game_zp: .res HS_DISK_ZP_BYTES,0
 hs_disk_buffer: .res HS_DISK_BYTES,0

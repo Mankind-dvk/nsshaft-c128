@@ -1,7 +1,12 @@
-; Modal-only TOP 5. Names are screen codes; scores are six unpacked digits.
-; This segment is outside the packed VIC graphics/music address ranges.
+; 排行榜上层：管理前五名、输入姓名、绘制结束界面；磁盘操作在 highscore_storage.inc。
+; 建议先看 run_highscore_game_over，了解“查排名 -> 输入 -> 插入 -> 保存 -> 展示”。
+; 下方分区：数据规则 / 姓名编辑 / 主流程 / 键盘 / 绘制 / 静态数据。
+; 仅启动和游戏结束时执行，不加入游戏每帧更新；独立段避开图形、字库和音乐区。
 .segment "HIGHSCORES"
 
+; === 1. 数据规则与排名维护 ===
+; 每条记录 = 8 字节姓名屏幕码（不足补空格）+ 6 字节分数（每字节一位，高位在前）。
+; 五条共 70 字节；count 标记有效条数。分数不是 ASCII，也不是压缩 BCD。
 HIGHSCORE_COUNT = 5
 HIGHSCORE_NAME_LENGTH = 8
 HIGHSCORE_RECORD_SIZE = HIGHSCORE_NAME_LENGTH + SCORE_DIGIT_COUNT
@@ -19,6 +24,7 @@ HS_EXT_KEYBOARD = $d02f
     jsr highscore_print
 .endmacro
 
+; 仅程序启动、读盘之前清空一次；每局重开不能调用，否则会丢掉已有排名。
 initialize_highscores:
     lda #0
     sta highscore_count
@@ -32,7 +38,9 @@ initialize_highscores:
     sta highscore_rank
     jmp highscore_name_reset
 
-; Lookup only: equal scores stay ahead of the new entry.
+; 只查位置，不修改记录；同分时旧记录在前，新记录继续向后找位置。
+; 输出 highscore_rank：0..4 表示插入位置，$ff 表示不能上榜。
+; 从最高位向后比较，首个不同数字决定大小；未满五条时允许追加。
 highscore_find_rank:
     lda #0
     sta highscore_work_row
@@ -70,6 +78,8 @@ highscore_find_rank:
     sta highscore_rank
     rts
 
+; 名次有效且姓名确认后才插入：从后向前搬动记录，避免覆盖还没搬走的数据。
+; 表满时丢弃原第五名。绘制函数不调用这里，因此刷新画面不会重复插入成绩。
 highscore_insert:
     ldx highscore_rank
     cpx #HIGHSCORE_COUNT
@@ -107,11 +117,14 @@ highscore_insert:
     bcs @dirty
     inc highscore_count
 @dirty:
+    ; dirty=1 只表示内存已修改；写盘并回读成功后，才算永久保存。
     lda #1
     sta highscore_dirty
 @done:
     rts
 
+; === 2. 姓名编辑：固定八格，输入与绘制分开 ===
+; 用文字字库的空格填满，不能用字符码 0 冒充空格。
 highscore_name_reset:
     lda #0
     sta highscore_name_length
@@ -123,7 +136,9 @@ highscore_name_reset:
     bpl @blank
     rts
 
-; A = PETSCII-compatible key. C=1 only for a nonblank RETURN confirmation.
+; 输入 A 为兼容 PETSCII 的键值；仅非空姓名按 RETURN 确认时返回 C=1。
+; 接受字母、数字、空格；字母转成大写屏幕码，DEL 删除末格，最多八格。
+; 其他编辑或无效按键返回 C=0；全空格姓名也不能确认。
 highscore_name_key:
     cmp #HS_KEY_RETURN
     beq @confirm
@@ -181,7 +196,8 @@ highscore_name_key:
     sec
     rts
 
-; Disk failures are visible before starting, with R to retry / FIRE to continue.
+; === 3. 主流程：启动读档与游戏结束 ===
+; 读档失败时显示提示：R 重试，FIRE 使用当前内存记录继续。
 highscore_load_at_start:
     jsr highscore_storage_load
     bcc @done
@@ -199,6 +215,8 @@ highscore_load_at_start:
 @done:
     rts
 
+; 阅读入口：游戏和音乐停止后进入，输入期间 score_digits 不再变化。
+; 能上榜才询问姓名；RETURN 确认后只插入一次，保存失败仍保留内存成绩。
 run_highscore_game_over:
     jsr highscore_find_rank
     lda highscore_rank
@@ -219,6 +237,7 @@ run_highscore_game_over:
 @commit:
     jsr highscore_insert
 @save_pending:
+    ; 即使本局没上榜，也尝试保存上次失败后留下的未保存记录。
     lda highscore_dirty
     beq @show
 @save:
@@ -226,6 +245,7 @@ run_highscore_game_over:
     HS_TEXT hs_saving, 21*40+4, COLOR_YELLOW
     jsr highscore_storage_save
     bcs @show
+    ; 只有写盘和回读验证成功才清除 dirty；显示出排行榜不代表已经保存。
     lda #0
     sta highscore_dirty
 @show:
@@ -239,7 +259,7 @@ run_highscore_game_over:
 @done:
     rts
 
-; R retries only; FIRE requires a full release/press/release cycle.
+; R 返回重试选择；FIRE 必须经过“松开 -> 按下 -> 松开”，避免按键穿透界面。
 highscore_wait_choice:
     jsr highscore_wait_key_release
 @release:
@@ -270,6 +290,8 @@ highscore_wait_choice:
     lda #'R'
     rts
 
+; === 4. 键盘输入：直接扫描 CIA1，不依赖系统屏幕编辑器 ===
+; 按帧等待输入；调用者每次读到按键后等待松开，按住不会每帧重复录入。
 highscore_read_key:
     jsr wait_for_frame
     jsr highscore_scan_key
@@ -282,9 +304,9 @@ highscore_wait_key_release:
     bne highscore_wait_key_release
     rts
 
-; Poll the base keyboard matrix with IRQs stopped; no screen-editor IRQ needed.
-; Ignore PB lines already held low with no row selected (paddle/fire inputs).
-; The matrix order matches VICE C128/gtk3_sym.vkm. Shift is deliberately ignored.
+; PA 每次拉低一行，PB 读取八列；未选行时已被 paddle/FIRE 拉低的输入线要屏蔽。
+; 键位顺序对应 VICE C128/gtk3_sym.vkm；忽略 Shift，不扫描完整扩展键盘。
+; 无支持的按键返回 A=0。扫描后恢复端口及方向寄存器，避免影响共用 CIA1 的 paddle。
 highscore_scan_key:
     lda CIA1_PORT_A
     sta highscore_saved_pa
@@ -348,6 +370,8 @@ highscore_scan_key:
     lda highscore_key_result
     rts
 
+; === 5. 界面绘制：姓名输入页与排行榜 ===
+; prepare_modal_screen 切回文字字库并关闭游戏 sprite，不再显示受伤角色。
 show_highscore_name_screen:
     jsr prepare_modal_screen
     HS_TEXT hs_qualified, 5*40+9, COLOR_YELLOW
@@ -368,6 +392,7 @@ show_highscore_name_screen:
     jsr highscore_render_name
     jmp enable_charset_display
 
+; 横线只是输入位置的光标，不写入姓名缓冲区，也不会进入存档。
 highscore_render_name:
     ldx #0
 @cell:
@@ -386,6 +411,8 @@ highscore_render_name:
 @done:
     rts
 
+; 只读取内存排行榜来绘制，不修改排名；本局记录高亮。
+; 根据 dirty 和读写状态显示“已保存”或失败提示，不能仅凭有记录就认为保存成功。
 show_highscore_table:
     jsr prepare_modal_screen
     HS_TEXT hs_game_over, 3*40+15, COLOR_RED
@@ -491,6 +518,7 @@ show_highscore_table:
     HS_TEXT hs_fire_prompt, 23*40+15, COLOR_WHITE
     jmp enable_charset_display
 
+; === 6. 绘制辅助：数字转换与双屏幕写入 ===
 highscore_copy_current_digits:
     ldx #SCORE_DIGIT_COUNT-1
 @copy:
@@ -500,6 +528,7 @@ highscore_copy_current_digits:
     bpl @copy
     rts
 
+; 分数每位是 0..9，加上 TEXT_DIGIT_0 才是文字字库字符码；不能用游戏 HUD 的基址。
 highscore_draw_digits:
     jsr highscore_output_pointers
     ldy #0
@@ -513,7 +542,7 @@ highscore_draw_digits:
     bne @digit
     rts
 
-; ROW_PTR = zero-terminated ASCII label; screen conversion is local to menus.
+; ROW_PTR 指向以 0 结尾的 ASCII 标签；这里只对菜单文字做屏幕码转换。
 highscore_print:
     jsr highscore_output_pointers
     ldy #0
@@ -527,6 +556,8 @@ highscore_print:
 @done:
     rts
 
+; DEST_PTR 指向屏幕 A，计算屏幕 B 与颜色 RAM 的对应地址。
+; 两块屏幕写入相同内容，防止切换缓冲区时露出旧画面。
 highscore_output_pointers:
     lda DEST_PTR
     sta NEXT_ROW_PTR
@@ -548,6 +579,8 @@ highscore_put_cell:
     sta (COLOR_PTR),y
     rts
 
+; === 7. 查表、界面文字与状态变量 ===
+; 记录偏移和屏幕行地址预先列出，运行时不必计算乘法。
 highscore_record_offsets: .byte 0,14,28,42,56
 highscore_screen_low:
     .repeat HIGHSCORE_COUNT,I
@@ -557,6 +590,7 @@ highscore_screen_high:
     .repeat HIGHSCORE_COUNT,I
     .byte >(SCREEN_A+(10+I*2)*40+9)
     .endrepeat
+; 基础 8x8 键盘矩阵查表；0 表示该键不参与姓名输入。
 highscore_keymap:
     .byte HS_KEY_DELETE,HS_KEY_RETURN,0,0,0,0,0,0
     .byte "3WA4ZSE",0
@@ -584,6 +618,8 @@ hs_load_help: .asciiz "CHECK DISK 8. FIRE USES RAM ONLY."
 hs_retry_prompt: .asciiz "R RETRY / FIRE CONTINUE"
 hs_fire_prompt: .asciiz "PRESS FIRE"
 
+; entries/count 是要存盘的成绩；rank/name/work 是本次界面的工作状态。
+; dirty 跨局保留，直到上层确认保存成功才清除。
 highscore_entries: .res HIGHSCORE_TABLE_SIZE,0
 highscore_count: .byte 0
 highscore_rank: .byte HS_NO_RANK

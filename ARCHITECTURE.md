@@ -14,34 +14,38 @@ the same generated machine code while making ownership and call flow explicit.
 
 ## Source map
 
-| File | Responsibility |
-| --- | --- |
-| `src/main.s` | BASIC loader, C128/VIC-IIe bootstrap, new-game setup, frame loop, game-over transition |
-| `src/constants.inc` | Hardware addresses, memory layout, screen codes, sprite slots, tuning constants |
-| `src/macros.inc` | Short inline operations with explicit register/flag contracts; no runtime state |
-| `src/video.inc` | Double buffering, pixel-scroll glyph transitions, modal screens, UI character layout |
-| `src/platforms.inc` | PRNG seeding, platform type/width/position generation, platform drawing |
-| `src/platform_rows.inc` | Row descriptions, hidden-playfield clearing, span rendering and effect-state synchronization |
-| `src/input.inc` | Paddle port setup and POTX sampling |
-| `src/hud.inc` | Character POTX display and dial hand |
-| `src/score.inc` | First-landing platform score, row claim flags and difficulty scheduling |
-| `src/health.inc` | Every-third-point HP reward, HUD rendering, spike/top damage recovery |
-| `src/character_select.inc` | Three-character title selection, paddle-neutral prompt/error feedback, frame/color lookup tables |
-| `src/player.inc` | Player sprite, horizontal control, gravity, landing and spike collision |
-| `src/fade_platforms.inc` | Disappearing-platform activation, crumbling stages, scrolling anchor and deletion |
-| `src/spring_platforms.inc` | Spring glyph transitions, compression lifecycle and upward launch |
-| `src/conveyor_platforms.inc` | Left/right texture animation, vertical fragments and full-texture restoration |
-| `src/music.inc` | PAL raster IRQ, three SID voices, instruments, frequency and pattern tables |
-| `src/charset_ids.inc` | Game glyph IDs/screen codes and separate text-layout codes |
-| `src/platform_materials.inc` | Multicolor fragments, colors, transition and collision lookup tables |
-| `src/charset.inc` | Writable 68-slot output and resource includes |
-| `src/highscores.inc` | TOP 5, keyboard name entry and text-only game-over flow |
-| `src/highscore_storage.inc` | Alternating checked disk records and KERNAL state isolation |
-| `src/graphics_charset.inc` | Source charset 1: only custom graphics, unused slots zero |
-| `src/text_charset.inc` | Source charset 2: imported uppercase font |
-| `src/charset_loader.inc` | Eight-byte range copies and scene-entry composition |
-| `src/assets.inc` | Includes the charset; sprite bitmaps, pointer templates, text and lookup tables |
-| `src/state.inc` | Mutable state bytes grouped in one visible RAM layout |
+The rows are grouped by game subsystem, not by the literal `.include` order in
+`main.s`. `assets.inc` includes `charset.inc`, which in turn includes the two
+source charsets and `charset_loader.inc`.
+
+| Subsystem | File | Responsibility |
+| --- | --- | --- |
+| Entry and shared state | `src/main.s` | BASIC loader, C128/VIC-IIe bootstrap, new-game setup, frame loop, game-over transition |
+| Entry and shared state | `src/constants.inc` | Hardware addresses, memory layout, screen codes, sprite slots, tuning constants |
+| Entry and shared state | `src/macros.inc` | Short inline operations with explicit register/flag contracts; no runtime state |
+| Entry and shared state | `src/state.inc` | Mutable state bytes grouped in one visible RAM layout |
+| Display and charsets | `src/video.inc` | Double buffering, pixel-scroll glyph transitions, modal screens, UI character layout |
+| Display and charsets | `src/charset_ids.inc` | Game glyph IDs/screen codes and separate text-layout codes |
+| Display and charsets | `src/charset.inc` | Writable 68-slot output and resource includes |
+| Display and charsets | `src/graphics_charset.inc` | Source charset 1: only custom graphics, unused slots zero |
+| Display and charsets | `src/text_charset.inc` | Source charset 2: imported uppercase font |
+| Display and charsets | `src/charset_loader.inc` | Eight-byte range copies and scene-entry composition |
+| Characters and controls | `src/assets.inc` | Sprite bitmap batches, charset include, pointer templates and lookup tables |
+| Characters and controls | `src/character_select.inc` | Three-character title selection, paddle-neutral prompt/error feedback, frame/color lookup tables |
+| Characters and controls | `src/input.inc` | Paddle port setup and POTX sampling |
+| Characters and controls | `src/player.inc` | Player sprite, horizontal control, gravity, landing and spike collision |
+| Characters and controls | `src/hud.inc` | Character POTX display and sprite direction indicator |
+| World and hazards | `src/platform_materials.inc` | Multicolor fragments, colors, transition and collision lookup tables |
+| World and hazards | `src/platforms.inc` | PRNG seeding, platform type/width/position generation, platform drawing |
+| World and hazards | `src/platform_rows.inc` | Row descriptions, hidden-playfield clearing, span rendering and effect-state synchronization |
+| World and hazards | `src/fade_platforms.inc` | Disappearing-platform activation, crumbling stages, scrolling anchor and deletion |
+| World and hazards | `src/spring_platforms.inc` | Spring glyph transitions, compression lifecycle and upward launch |
+| World and hazards | `src/conveyor_platforms.inc` | Left/right texture animation, vertical fragments and full-texture restoration |
+| World and hazards | `src/health.inc` | Every-third-point HP reward, HUD rendering, spike/top damage recovery |
+| Audio | `src/music.inc` | PAL raster IRQ, three SID voices, instruments, frequency and pattern tables |
+| Scoring and leaderboard | `src/score.inc` | First-landing platform score, row claim flags and difficulty scheduling |
+| Scoring and leaderboard | `src/highscores.inc` | Top-five ranking, name entry and leaderboard screen |
+| Scoring and leaderboard | `src/highscore_storage.inc` | Dual-slot disk load/save, validation and KERNAL environment preservation |
 
 ## Macro layer
 
@@ -87,7 +91,7 @@ See section 21 of both beginner guides for expansion examples and debugging.
 3. seed the PRNG, reset score/HP/claim state, and generate platforms;
 4. draw the fixed UI, six-digit score and three-digit HP;
 5. initialize POTX display;
-6. create the player and dial hand;
+6. create the player and direction indicator;
 7. initialize the SID arrangement and install the raster IRQ;
 8. copy the visible screen into the hidden buffer and enable the display.
 
@@ -96,7 +100,7 @@ polling waits for a later frame; it does not run catch-up updates:
 
 1. wait for raster line 250;
 2. sample POTX;
-3. update the dial hand and POTX digits;
+3. update the direction indicator and POTX digits;
 4. update horizontal player movement;
 5. update gravity, upward spring motion and platform collision;
 6. update activated disappearing and compressed spring platforms, then call
@@ -124,33 +128,39 @@ than one display frame.
 
 ## Memory map
 
-| Range | Use |
-| --- | --- |
-| `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
-| `$1d00-$2786` | Main loop, video, platform descriptions/rendering, HUD, score, tables and state |
-| `$2800-$2a1f` | Writable 68-glyph mixed-mode output charset |
-| `$2a20-$2de2` | SID player, frequency tables and 16-bar arrangement |
-| `$2e00-$2f2c` | Disappearing-platform effect routines |
-| `$3000-$303f` | Player normal frame |
-| `$3040-$307f` | Player falling frame |
-| `$3080-$30bf` | Player facing/moving right frame |
-| `$30c0-$30ff` | Player facing/moving left frame |
-| `$3100-$313f` | Writable dial-hand block |
-| `$3140-$3779` | Player physics, ceiling recovery and spring/conveyor routines |
-| `$3800-$39da` | Ceiling drawing, weighted generation, HP display and spike recovery |
-| `$3a00-$3cbf` | Elien hurt plus all five Ember and five Wasser frames |
-| `$3cc0-$3e64` | Character-selection code, prompt text and frame/color lookup tables |
-| `$4000-$47ff` | Immutable graphics-only source charset, 2 KB |
-| `$4800-$4fff` | Immutable uppercase text source charset, 2 KB |
-| `$5000-$5360` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
-| `$5400-$630a` | Leaderboard, keyboard name entry, disk persistence and buffers |
-| `$0400-$07ff` | Screen buffer A and its sprite pointers |
-| `$0c00-$0fff` | Screen buffer B and its sprite pointers |
-| `$d800-$dbff` | Shared VIC color RAM |
+This table follows the game's subsystems rather than numeric address order. The
+three sprite rows show the bitmap allocation in its original, expanded, and
+fast-frame batches. Ranges are inclusive; score state listed inside `CODE` is
+shown again only to locate it, not as additional allocated space.
+
+| Subsystem | Range | Use |
+| --- | --- | --- |
+| Startup | `$1c01-$1c0c` | BASIC 7 `SYS 7424` loader |
+| Core and shared state | `$1d00-$25da` | Main loop, video, platform descriptions/rendering, HUD, score, tables and state (`CODE`) |
+| Shared zero-page scratch | `$f7-$fe` | Four two-byte screen/color pointers; outside the PRG segments |
+| Display buffers | `$0400-$07ff`, `$0c00-$0fff` | Screen buffers A and B; each contains its sprite pointers in the last eight bytes |
+| Display color | `$d800-$dbff` | Shared VIC color RAM, not a PRG segment |
+| Runtime charset | `$2800-$2a1f` | Writable 68-slot mixed-mode output charset; slots 22..39 free |
+| Source charsets | `$4000-$47ff`, `$4800-$4fff` | Immutable graphics-only and uppercase-text source charsets, 2 KB each |
+| Charset and material code | `$5000-$5360` | Material/collision tables, descriptor effect updates, conveyor animation and charset composition |
+| **Sprite bitmaps, first batch** | **`$3000-$30ff`** | Elien normal, fall, right and left: four 64-byte frames (`SPRITE`) |
+| **Sprite bitmaps, second batch** | **`$3a00-$3cbf`** | Elien hurt, then Ember's and Wasser's five normal/fall/right/left/hurt frames each: eleven 64-byte frames (`PLAYERSETS`) |
+| **Sprite bitmaps, fast batch** | **`$3e80-$3fff`** | Elien, Ember and Wasser fast-left/fast-right: six 64-byte frames (`FASTSPRITES`) |
+| Former sprite slot | `$3100-$313f` | Free former dial-hand block; HUD sprite 4 reuses the character bitmap blocks above |
+| Character selection | `$3cc0-$3e6a` | Title selection, prompt text and frame/color lookup tables |
+| Player physics | `$3140-$376d` | Player movement/collision, ceiling recovery and spring/conveyor routines |
+| Platform effects | `$2e00-$2f2c` | Disappearing-platform effect routines |
+| World and health | `$3800-$39da` | Ceiling drawing, weighted generation, HP display and spike recovery |
+| Music | `$2a20-$2de2` | SID player, frequency tables and 16-bar arrangement |
+| Score state within `CODE` | `$257b-$2580`, `$2587-$259a` | Six score digits and 20 per-row first-landing claim flags |
+| Persistent leaderboard | `$5400-$630a` | Top-five ranking, name entry, screen rendering and disk storage code/data (`HIGHSCORES`) |
 
 The linker configuration fixes the charset and sprite ranges. A build fails if
 code grows into the reserved charset region or assets exceed their reserved
-space.
+space. The two-byte PRG load-address header is listed at `$1bff-$1c00` by the
+linker but does not occupy those runtime RAM addresses. The address-sorted map
+is in `README.md`; the exact current segment ends come from
+`build/nsshaft-c128.map`.
 
 ## Sprite allocation
 
@@ -160,13 +170,16 @@ space.
 | 1 | Middle preview during title selection; otherwise free |
 | 2 | Right preview during title selection; otherwise free |
 | 3 | Free |
-| 4 | Red paddle/dial hand |
+| 4 | Selected character's five-level direction/speed indicator |
 | 5-7 | Free |
 
-Each of the three characters has normal/fall/right/left/hurt bitmap blocks.
+Each of the three characters has normal/fall/right/left/hurt plus fast-left and
+fast-right bitmap blocks.
 Elien's movement frames occupy `$3000-$30ff`; the other eleven blocks occupy
-`$3a00-$3cbf`. Gameplay selects one of these fifteen memory blocks through
-hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
+`$3a00-$3cbf`. The six new frames occupy `$3e80-$3fff` in character order.
+Gameplay selects one of these 21 memory blocks through hardware sprite 0's
+pointer; HUD sprite 4 reuses the same directional blocks. Only the selector
+temporarily uses sprites 1 and 2.
 
 ## Important invariants
 
@@ -232,11 +245,13 @@ hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
   `fade_stage` selects cracked (0) or broken (1). `fade_platform_timer` starts
   at 50 and changes stage at 25; zero deletes the active platform. This is half
   the previous 100-frame lifetime: about one second instead of two on PAL.
-- Game output: bodies 1..7, fragments 8..19, frame 20, ceiling 21, dial 22..39,
-  HUD text 40..55, extra fade variants 56..61, SCORE letters S/C/R/E at 62..65.
+- Game output: bodies 1..7, fragments 8..19, frame 20, ceiling 21, free slots
+  22..39, HUD text 40..55, extra fade variants 56..61, SCORE letters S/C/R/E
+  at 62..65, conveyor lower fragments 66..67.
   See [CHARSET_LAYOUT.md](CHARSET_LAYOUT.md).
-- The dial stores only its 18 nonblank tiles, grouped at 22..39; its screen-code
-  maps substitute character 0 for the six blank cells.
+- The direction indicator is sprite 4 pointing to the selected character's
+  fast-left, left, normal, right or fast-right frame; no extra HUD glyphs are
+  needed.
 - D011=$1b disables ECM; D016=$18 enables mixed hires/multicolor text. Color RAM
   bit 3 selects each cell's mode. D021/D022/D023 are black/white/gray. Normal bricks
   and all fade stages use Color RAM=10; fade pairs 00/10/11 are black/gray/red.
@@ -256,10 +271,11 @@ hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
   Four horizontal phases repeat every 12 frames regardless of player support or
   whether the world scrolls that frame. Only the texture moves horizontally;
   platform boundaries and collision geometry do not.
-- Conveyors use independent FULL 5/6, UPPER 18/19 and LOWER 66/67 slots.
-  Fragment rebuilding does not reshape FULL cells on the still-visible matrix.
-  Before a completed coarse scroll becomes visible, FULL is refreshed from the
-  current horizontal pattern without changing the old matrix's LOWER fragments.
+- Conveyors keep independent FULL 5/6, UPPER 18/19 and LOWER 66/67 slots.
+  Fragment rebuilding therefore cannot reshape still-visible FULL cells.
+  Animation rebuilds UPPER/LOWER at the current vertical phase; before a
+  completed coarse scroll becomes visible, FULL is restored from the current
+  horizontal pattern, never the initial source phase.
 - Modal entry copies the first 64 glyphs from source charset 2; TEXT_* uses
   standard C64 uppercase screen codes. No modal letters alias game fragments.
 - New-game entry reconstructs the output from custom graphics plus only the
@@ -276,12 +292,11 @@ hardware sprite 0's pointer. Only the selector temporarily uses sprites 1 and 2.
   into the low bits of `$d011`.
 - Player collision and sprite Y positions use the same
   `SCREEN_ROW0_BASE_Y + fine_scroll` coordinate model.
-- Paddle movement and the five dial angles share the same dead-zone and outer
-  speed thresholds. The two extreme ranges use a one-frame movement delay;
-  inner left/right ranges retain the two-frame delay.
+- Paddle movement and the direction sprite share the same neutral range 108..148.
+  Movement still uses two speeds on each side, with thresholds 64 and 192.
 - The music IRQ must not use shared zero-page scratch locations.
 - Lead, bass and arpeggio patterns must each contain exactly 128 steps.
-- The music segment must end at or before `$2e00`, where platform effects begin.
+- The music segment must end before `$2e00`, where platform effects begin.
 - `stop_music` leaves IRQs disabled and does not restore the previous IRQ vector;
   the next round installs the music handler again. Returning to BASIC would need
   a separate machine-state restoration path.

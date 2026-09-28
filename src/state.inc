@@ -121,8 +121,6 @@ potx_tens:
     .byte 2
 potx_ones:
     .byte 8
-dashboard_pointer_state:
-    .byte $ff
 ; music_step 是 0..127 的八分音符索引。音乐相位采用模 512 的 9 位累加器，
 ; low 保存低 8 位，high 只会是 0 或 1；increment 由分数档位同步更新。
 music_step:
